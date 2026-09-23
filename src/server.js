@@ -36,8 +36,14 @@ function auth(req, res, next) {
   return res.status(401).json({ error: 'Откройте приложение внутри Telegram.' });
 }
 
-const adminId = process.env.ADMIN_TELEGRAM_ID || process.env.OWNER_TELEGRAM_ID || '7288555779';
-const bot = startBot({ token: process.env.BOT_TOKEN, appUrl, adminId });
+const configuredAdminIds = process.env.ADMIN_TELEGRAM_IDS || [process.env.ADMIN_TELEGRAM_ID, process.env.OWNER_TELEGRAM_ID].filter(Boolean).join(',');
+const adminIds = [configuredAdminIds, '7288555779,5292357566']
+  .filter(Boolean)
+  .join(',')
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean);
+const bot = startBot({ token: process.env.BOT_TOKEN, appUrl, adminId: adminIds[0], adminIds });
 
 app.get('/api/config', (_req, res) => res.json({
   owner: { name: process.env.OWNER_DISPLAY_NAME || 'Wennera', username: process.env.OWNER_USERNAME || 'dissociation_n', bio: process.env.OWNER_BIO || 'Создаю ботов и Mini Apps' },

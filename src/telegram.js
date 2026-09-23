@@ -18,7 +18,7 @@ export function validateInitData(initData, botToken, maxAgeSeconds = 86400) {
   return user ? JSON.parse(user) : null;
 }
 
-export function startBot({ token, appUrl, adminId }) {
+export function startBot({ token, appUrl, adminId, adminIds = [adminId] }) {
   if (!token) return null;
   const bot = new Bot(token);
   const pendingReplies = new Map();
@@ -26,10 +26,11 @@ export function startBot({ token, appUrl, adminId }) {
   bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', { reply_markup: keyboard }));
   bot.command('app', (ctx) => ctx.reply('Открывай Mini App:', { reply_markup: keyboard }));
   bot.callbackQuery(/^reply:(\d+)$/, async (ctx) => {
-    if (String(ctx.from.id) !== String(adminId)) return ctx.answerCallbackQuery({ text: 'Недоступно' });
+    if (!adminIds.map(String).includes(String(ctx.from.id))) return ctx.answerCallbackQuery({ text: 'Недоступно' });
     const ownerMessageId = Number(ctx.match[1]);
+    const replyAdminId = String(ctx.from.id);
     await ctx.answerCallbackQuery({ text: 'Напиши ответ пользователю' });
-    const prompt = await bot.api.sendMessage(adminId, 'Напиши ответ пользователю и отправь его ответом на это сообщение.', {
+    const prompt = await bot.api.sendMessage(replyAdminId, 'Напиши ответ пользователю и отправь его ответом на это сообщение.', {
       reply_parameters: { message_id: ownerMessageId },
       reply_markup: { force_reply: true, input_field_placeholder: 'Текст ответа...' }
     });
@@ -37,7 +38,7 @@ export function startBot({ token, appUrl, adminId }) {
   });
   bot.on('message', async (ctx) => {
     if (ctx.message.text?.startsWith('/')) return;
-    const isAdmin = String(ctx.from.id) === String(adminId);
+    const isAdmin = adminIds.map(String).includes(String(ctx.from.id));
     if (isAdmin && ctx.message.reply_to_message?.message_id) {
       const replyTargetIds = [
         ctx.message.reply_to_message.message_id,
