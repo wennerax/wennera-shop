@@ -24,10 +24,23 @@ export function startBot({ token, appUrl, adminId }) {
   const keyboard = new InlineKeyboard().webApp('Открыть ассистента', appUrl);
   bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', { reply_markup: keyboard }));
   bot.command('app', (ctx) => ctx.reply('Открывай Mini App:', { reply_markup: keyboard }));
+  bot.callbackQuery(/^reply:(\d+)$/, async (ctx) => {
+    if (String(ctx.from.id) !== String(adminId)) return ctx.answerCallbackQuery({ text: 'Недоступно' });
+    const ownerMessageId = Number(ctx.match[1]);
+    await ctx.answerCallbackQuery({ text: 'Напиши ответ пользователю' });
+    await bot.api.sendMessage(adminId, 'Напиши ответ пользователю и отправь его ответом на это сообщение.', {
+      reply_parameters: { message_id: ownerMessageId },
+      reply_markup: { force_reply: true, input_field_placeholder: 'Текст ответа...' }
+    });
+  });
   bot.on('message', async (ctx) => {
     if (ctx.message.text?.startsWith('/')) return;
     if (adminId && String(ctx.from.id) === String(adminId) && ctx.message.reply_to_message?.message_id) {
-      const message = getMessageByOwnerMessageId(ctx.message.reply_to_message.message_id);
+      const replyTargetIds = [
+        ctx.message.reply_to_message.message_id,
+        ctx.message.reply_to_message.reply_to_message?.message_id
+      ].filter(Boolean);
+      const message = replyTargetIds.map((id) => getMessageByOwnerMessageId(id)).find(Boolean);
       if (message && ctx.message.text?.trim()) {
         await bot.api.sendMessage(message.telegram_id, `Ответ Wennera:\n\n${ctx.message.text.trim()}`);
         saveMessageReply(message.id, ctx.message.text.trim());
@@ -45,9 +58,12 @@ export function startBot({ token, appUrl, adminId }) {
     const label = { bug: 'Баг-репорт', order: 'Новый заказ', message: 'Новое сообщение' }[request.type];
     const identity = [user.first_name, user.last_name].filter(Boolean).join(' ') + (user.username ? ` (@${user.username})` : '');
     const text = `⚡ ${label}\nПользователь: ${identity}\nID: ${user.id}\n${request.title}\n\n${request.details}${request.bot_name ? `\n\nБот: ${request.bot_name}` : ''}${request.budget ? `\nБюджет: ${request.budget} ₽` : ''}`;
+    const replyButton = request.type === 'message'
+      ? { inline_keyboard: [[{ text: 'Ответить', callback_data: `reply:${request.id}` }]] }
+      : undefined;
     const sent = mediaPath && fs.existsSync(mediaPath)
-      ? await bot.api.sendDocument(adminId, new InputFile(mediaPath), { caption: text })
-      : await bot.api.sendMessage(adminId, text);
+      ? await bot.api.sendDocument(adminId, new InputFile(mediaPath), { caption: text, ...(replyButton ? { reply_markup: replyButton } : {}) })
+      : await bot.api.sendMessage(adminId, text, replyButton ? { reply_markup: replyButton } : undefined);
     if (request.id) setOwnerMessageId(request.id, sent.message_id);
   }};
 }
