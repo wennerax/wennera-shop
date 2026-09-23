@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d0f">
+  <title>Wennera Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
+</head>
+<body>
+  <div class="grain"></div>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">W</span><span>WENNERA<span class="muted">.LAB</span></span></div>
+      <button class="icon-button" id="fullscreen" aria-label="На весь экран">↗</button>
+    </header>
+
+    <section class="view active" data-view="home">
+      <div class="hero reveal"><p class="eyebrow"><span class="pulse"></span> PERSONAL ASSISTANT</p><h1>Идеи,<br><em>которые работают.</em></h1><p class="hero-copy">Боты, Mini Apps и решения под задачу. Оставь заявку или напиши напрямую.</p></div>
+      <div class="owner-card reveal delay-1"><div class="avatar">W</div><div><p class="card-label">НА СВЯЗИ</p><h2 id="owner-name">Wennera</h2><p id="owner-bio">Создаю ботов и Mini Apps</p></div><span class="status-dot"></span></div>
+      <div class="quick-grid reveal delay-2"><button class="action-card" data-open="order"><span class="action-icon">✦</span><strong>Заказать бота</strong><small>от 2 500 ₽ · кастомно</small><span class="arrow">↗</span></button><button class="action-card" data-open="bug"><span class="action-icon">⌁</span><strong>Нашёл баг?</strong><small>Расскажи, разберёмся</small><span class="arrow">↗</span></button></div>
+      <button class="wide-link reveal delay-3" data-open="message"><span>Написать мне сообщение</span><span>→</span></button>
+    </section>
+
+    <section class="view" data-view="requests"><div class="section-heading"><div><p class="eyebrow">ACTIVITY LOG</p><h1>Мои заявки</h1></div><span class="count" id="request-count">0</span></div><div id="request-list" class="request-list"></div><div class="empty-state" id="empty-state"><span class="empty-mark">⌁</span><h2>Здесь пока тихо</h2><p>Создай первую заявку, и она появится в этом списке.</p><button class="primary-button" data-open="order">Создать заявку <span>→</span></button></div></section>
+
+    <section class="view" data-view="profile"><p class="eyebrow">IDENTITY CARD</p><div class="profile-head"><div class="profile-avatar" id="profile-avatar">P</div><div><h1 id="profile-name">Preview</h1><p id="profile-handle">режим просмотра</p></div></div><div class="stats"><div><strong id="stat-total">0</strong><span>заявок</span></div><div><strong>24/7</strong><span>на связи</span></div><div><strong>∞</strong><span>идей</span></div></div><div class="info-line"><span>Telegram ID</span><b id="profile-id">preview</b></div><div class="info-line"><span>Статус</span><b class="accent">активен</b></div></section>
+
+    <section class="view" data-view="form"><button class="back-link" id="back-button">← назад</button><p class="eyebrow" id="form-kicker">NEW REQUEST</p><h1 id="form-title">Заказать бота</h1><p class="form-intro" id="form-intro">Опиши идею, а я вернусь с оценкой и планом.</p><form id="request-form"><input type="hidden" name="type" id="form-type"><label>Заголовок <input required name="title" placeholder="Например, бот для команды"></label><label id="bot-name-label">Какой бот? <input name="botName" placeholder="@username или название"></label><label id="budget-label">Бюджет, ₽ <input type="number" min="2500" name="budget" placeholder="от 2500"></label><label>Подробности <textarea required name="details" rows="5" placeholder="Расскажи, что нужно сделать..."></textarea></label><label class="file-label"><span>Прикрепить медиа</span><input type="file" name="media" accept="image/*,video/*,.pdf"><small>до 20 МБ · фото, видео или PDF</small></label><button class="primary-button" type="submit">Отправить заявку <span>↗</span></button></form></section>
+    <nav class="bottom-nav"><button class="nav-item active" data-nav="home"><span>⌂</span><small>Главная</small></button><button class="nav-item" data-nav="requests"><span>⌁</span><small>Заявки</small></button><button class="nav-item" data-nav="profile"><span>◎</span><small>Профиль</small></button></nav>
+  </main><div class="toast" id="toast"></div><script src="/app.js"></script>
+</body>
+</html>
