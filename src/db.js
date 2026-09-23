@@ -55,14 +55,32 @@ export function getUserRequests(telegramId) {
     FROM requests WHERE telegram_id = ? AND type != 'message' ORDER BY id DESC`).all(telegramId);
 }
 
+for (const column of ['owner_message_id INTEGER', 'reply_text TEXT', 'replied_at TEXT']) {
+  try { db.exec(`ALTER TABLE messages ADD COLUMN ${column}`); } catch (error) {
+    if (!error.message.includes('duplicate column name')) throw error;
+  }
+}
+
 export function getUserMessages(telegramId) {
-  return db.prepare(`SELECT id, title, details, status, created_at
+  return db.prepare(`SELECT id, title, details, reply_text, replied_at, status, created_at
     FROM messages WHERE telegram_id = ? ORDER BY id DESC`).all(telegramId);
 }
 
 export function createMessage(message) {
   return db.prepare(`INSERT INTO messages (telegram_id, title, details)
     VALUES (@telegram_id, @title, @details)`).run(message).lastInsertRowid;
+}
+
+export function setOwnerMessageId(id, ownerMessageId) {
+  db.prepare('UPDATE messages SET owner_message_id = ? WHERE id = ?').run(ownerMessageId, id);
+}
+
+export function getMessageByOwnerMessageId(ownerMessageId) {
+  return db.prepare('SELECT * FROM messages WHERE owner_message_id = ?').get(ownerMessageId);
+}
+
+export function saveMessageReply(id, replyText) {
+  db.prepare(`UPDATE messages SET reply_text = ?, replied_at = CURRENT_TIMESTAMP, status = 'answered' WHERE id = ?`).run(replyText, id);
 }
 
 export function getUser(telegramId) {

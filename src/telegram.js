@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
-import { upsertUser } from './db.js';
+import { getMessageByOwnerMessageId, saveMessageReply, setOwnerMessageId, upsertUser } from './db.js';
 
 export function validateInitData(initData, botToken, maxAgeSeconds = 86400) {
   if (!initData || !botToken) return null;
@@ -26,6 +26,15 @@ export function startBot({ token, appUrl, adminId }) {
   bot.command('app', (ctx) => ctx.reply('Открывай Mini App:', { reply_markup: keyboard }));
   bot.on('message', async (ctx) => {
     if (ctx.message.text?.startsWith('/')) return;
+    if (adminId && String(ctx.from.id) === String(adminId) && ctx.message.reply_to_message?.message_id) {
+      const message = getMessageByOwnerMessageId(ctx.message.reply_to_message.message_id);
+      if (message && ctx.message.text?.trim()) {
+        await bot.api.sendMessage(message.telegram_id, `Ответ Wennera:\n\n${ctx.message.text.trim()}`);
+        saveMessageReply(message.id, ctx.message.text.trim());
+        await ctx.reply('Ответ отправлен пользователю.');
+        return;
+      }
+    }
     upsertUser({ id: String(ctx.from.id), first_name: ctx.from.first_name, last_name: ctx.from.last_name ?? null, username: ctx.from.username ?? null, photo_url: null });
     await ctx.reply('Сообщение принято. Для заявки с деталями открой Mini App.', { reply_markup: keyboard });
   });
@@ -36,7 +45,9 @@ export function startBot({ token, appUrl, adminId }) {
     const label = { bug: 'Баг-репорт', order: 'Новый заказ', message: 'Новое сообщение' }[request.type];
     const identity = [user.first_name, user.last_name].filter(Boolean).join(' ') + (user.username ? ` (@${user.username})` : '');
     const text = `⚡ ${label}\nПользователь: ${identity}\nID: ${user.id}\n${request.title}\n\n${request.details}${request.bot_name ? `\n\nБот: ${request.bot_name}` : ''}${request.budget ? `\nБюджет: ${request.budget} ₽` : ''}`;
-    if (mediaPath && fs.existsSync(mediaPath)) await bot.api.sendDocument(adminId, new InputFile(mediaPath), { caption: text });
-    else await bot.api.sendMessage(adminId, text);
+    const sent = mediaPath && fs.existsSync(mediaPath)
+      ? await bot.api.sendDocument(adminId, new InputFile(mediaPath), { caption: text })
+      : await bot.api.sendMessage(adminId, text);
+    if (request.id) setOwnerMessageId(request.id, sent.message_id);
   }};
 }

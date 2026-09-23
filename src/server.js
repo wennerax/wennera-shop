@@ -70,7 +70,7 @@ app.post('/api/messages', auth, async (req, res) => {
   if (req.user.id === 'preview') return res.json({ ok: true, preview: true });
   const message = { telegram_id: req.user.id, title: title.trim(), details: details.trim() };
   const id = createMessage(message);
-  try { await bot?.notify({ ...message, type: 'message' }, req.user); } catch (error) { console.error('Telegram message notification failed:', error.message); }
+  try { await bot?.notify({ ...message, id, type: 'message' }, req.user); } catch (error) { console.error('Telegram message notification failed:', error.message); }
   return res.status(201).json({ ok: true, id });
 });
 
