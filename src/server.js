@@ -20,11 +20,11 @@ const upload = multer({
 app.use(express.json({ limit: '200kb' }));
 app.use(express.static(path.resolve('public')));
 
-const demoUser = { id: 'preview', first_name: 'Preview', last_name: null, username: null, photo_url: null };
+const demoUser = { id: 'preview', first_name: 'Preview', last_name: null, username: null, photo_url: null, language_code: 'ru', is_premium: false, bio: null, profile_music: null };
 function auth(req, res, next) {
   const user = validateInitData(req.headers['x-telegram-init-data'], process.env.BOT_TOKEN);
   if (user) {
-    const normalized = { id: String(user.id), first_name: user.first_name, last_name: user.last_name ?? null, username: user.username ?? null, photo_url: user.photo_url ?? null };
+    const normalized = { id: String(user.id), first_name: user.first_name, last_name: user.last_name ?? null, username: user.username ?? null, photo_url: user.photo_url ?? null, language_code: user.language_code ?? null, is_premium: Boolean(user.is_premium), bio: null, profile_music: null };
     upsertUser(normalized);
     req.user = normalized;
     return next();

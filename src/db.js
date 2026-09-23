@@ -21,6 +21,12 @@ db.exec(`
   );
 `);
 
+for (const column of ['language_code TEXT', 'is_premium INTEGER NOT NULL DEFAULT 0', 'bio TEXT', 'profile_music TEXT']) {
+  try { db.exec(`ALTER TABLE users ADD COLUMN ${column}`); } catch (error) {
+    if (!error.message.includes('duplicate column name')) throw error;
+  }
+}
+
 export function upsertUser(user) {
   db.prepare(`INSERT INTO users (telegram_id, first_name, last_name, username, photo_url)
     VALUES (@id, @first_name, @last_name, @username, @photo_url)
