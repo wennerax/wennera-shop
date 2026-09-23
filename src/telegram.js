@@ -37,7 +37,8 @@ export function startBot({ token, appUrl, adminId }) {
   });
   bot.on('message', async (ctx) => {
     if (ctx.message.text?.startsWith('/')) return;
-    if (adminId && String(ctx.from.id) === String(adminId) && ctx.message.reply_to_message?.message_id) {
+    const isAdmin = String(ctx.from.id) === String(adminId);
+    if (isAdmin && ctx.message.reply_to_message?.message_id) {
       const replyTargetIds = [
         ctx.message.reply_to_message.message_id,
         ctx.message.reply_to_message.reply_to_message?.message_id
@@ -52,6 +53,7 @@ export function startBot({ token, appUrl, adminId }) {
         return;
       }
     }
+    if (isAdmin) return;
     upsertUser({ id: String(ctx.from.id), first_name: ctx.from.first_name, last_name: ctx.from.last_name ?? null, username: ctx.from.username ?? null, photo_url: null });
     await ctx.reply('Сообщение принято. Для заявки с деталями открой Mini App.', { reply_markup: keyboard });
   });
