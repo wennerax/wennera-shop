@@ -21,6 +21,7 @@ export function validateInitData(initData, botToken, maxAgeSeconds = 86400) {
 export function startBot({ token, appUrl, adminId }) {
   if (!token) return null;
   const bot = new Bot(token);
+  const pendingReplies = new Map();
   const keyboard = new InlineKeyboard().webApp('Открыть ассистента', appUrl);
   bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', { reply_markup: keyboard }));
   bot.command('app', (ctx) => ctx.reply('Открывай Mini App:', { reply_markup: keyboard }));
@@ -28,10 +29,11 @@ export function startBot({ token, appUrl, adminId }) {
     if (String(ctx.from.id) !== String(adminId)) return ctx.answerCallbackQuery({ text: 'Недоступно' });
     const ownerMessageId = Number(ctx.match[1]);
     await ctx.answerCallbackQuery({ text: 'Напиши ответ пользователю' });
-    await bot.api.sendMessage(adminId, 'Напиши ответ пользователю и отправь его ответом на это сообщение.', {
+    const prompt = await bot.api.sendMessage(adminId, 'Напиши ответ пользователю и отправь его ответом на это сообщение.', {
       reply_parameters: { message_id: ownerMessageId },
       reply_markup: { force_reply: true, input_field_placeholder: 'Текст ответа...' }
     });
+    pendingReplies.set(prompt.message_id, ownerMessageId);
   });
   bot.on('message', async (ctx) => {
     if (ctx.message.text?.startsWith('/')) return;
@@ -40,10 +42,12 @@ export function startBot({ token, appUrl, adminId }) {
         ctx.message.reply_to_message.message_id,
         ctx.message.reply_to_message.reply_to_message?.message_id
       ].filter(Boolean);
-      const message = replyTargetIds.map((id) => getMessageByOwnerMessageId(id)).find(Boolean);
+      const message = replyTargetIds.map((id) => getMessageByOwnerMessageId(id)).find(Boolean)
+        || getMessageByOwnerMessageId(pendingReplies.get(ctx.message.reply_to_message.message_id));
       if (message && ctx.message.text?.trim()) {
         await bot.api.sendMessage(message.telegram_id, `Ответ Wennera:\n\n${ctx.message.text.trim()}`);
         saveMessageReply(message.id, ctx.message.text.trim());
+        pendingReplies.delete(ctx.message.reply_to_message.message_id);
         await ctx.reply('Ответ отправлен пользователю.');
         return;
       }

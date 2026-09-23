@@ -11,6 +11,7 @@ function switchView(name) {
   document.querySelectorAll('.view').forEach((view) => view.classList.toggle('active', view.dataset.view === name));
   document.querySelectorAll('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.nav === name));
   haptic(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (name === 'messages' && state.user) loadData().catch(() => {});
 }
 
 function openDirectMessage() {
