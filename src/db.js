@@ -19,6 +19,15 @@ db.exec(`
     media_path TEXT, status TEXT NOT NULL DEFAULT 'new', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
   );
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    details TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
+  );
 `);
 
 for (const column of ['language_code TEXT', 'is_premium INTEGER NOT NULL DEFAULT 0', 'bio TEXT', 'profile_music TEXT']) {
@@ -48,7 +57,12 @@ export function getUserRequests(telegramId) {
 
 export function getUserMessages(telegramId) {
   return db.prepare(`SELECT id, title, details, status, created_at
-    FROM requests WHERE telegram_id = ? AND type = 'message' ORDER BY id DESC`).all(telegramId);
+    FROM messages WHERE telegram_id = ? ORDER BY id DESC`).all(telegramId);
+}
+
+export function createMessage(message) {
+  return db.prepare(`INSERT INTO messages (telegram_id, title, details)
+    VALUES (@telegram_id, @title, @details)`).run(message).lastInsertRowid;
 }
 
 export function getUser(telegramId) {

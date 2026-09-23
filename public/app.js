@@ -14,10 +14,8 @@ function switchView(name) {
 }
 
 function openDirectMessage() {
-  const username = state.config?.owner?.username;
-  if (!username) { showToast('Личный Telegram не настроен.'); return; }
-  const url = `https://t.me/${username.replace(/^@/, '')}`;
-  if (tg?.openTelegramLink) tg.openTelegramLink(url); else window.open(url, '_blank', 'noopener,noreferrer');
+  switchView('messages');
+  $('#direct-title').focus();
   haptic('medium');
 }
 
@@ -37,11 +35,17 @@ function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => 
 document.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.nav)));
 document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => button.dataset.open === 'message' ? openDirectMessage() : openForm(button.dataset.open)));
 $('#back-button').addEventListener('click', () => switchView('home'));
+$('#direct-back').addEventListener('click', () => switchView('home'));
 $('#fullscreen').addEventListener('click', () => { tg?.requestFullscreen?.(); tg?.expand?.(); haptic('medium'); });
 $('#request-form').addEventListener('submit', async (event) => {
   event.preventDefault(); const button = event.target.querySelector('button[type="submit"]'); button.disabled = true; button.textContent = 'Отправляю...';
   try { const response = await api('/api/requests', { method: 'POST', body: new FormData(event.target) }); showToast(response.preview ? 'Preview: заявка готова к отправке' : 'Заявка принята. Я скоро отвечу.'); event.target.reset(); switchView('requests'); await loadData(); haptic('medium'); }
   catch (error) { showToast(error.message); } finally { button.disabled = false; button.innerHTML = 'Отправить заявку <span>↗</span>'; }
+});
+$('#direct-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const button = event.target.querySelector('button[type="submit"]'); button.disabled = true; button.textContent = 'Отправляю...';
+  try { const response = await api('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: $('#direct-title').value, details: $('#direct-details').value }) }); showToast(response.preview ? 'Preview: сообщение готово к отправке' : 'Сообщение отправлено.'); event.target.reset(); haptic('medium'); }
+  catch (error) { showToast(error.message); } finally { button.disabled = false; button.innerHTML = 'Отправить сообщение <span>↗</span>'; }
 });
 
 async function loadData() {

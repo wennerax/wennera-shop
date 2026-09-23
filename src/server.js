@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import multer from 'multer';
-import { createRequest, getUserMessages, getUserRequests, upsertUser } from './db.js';
+import { createMessage, createRequest, getUserMessages, getUserRequests, upsertUser } from './db.js';
 import { startBot, validateInitData } from './telegram.js';
 
 const app = express();
@@ -61,6 +61,16 @@ app.post('/api/requests', auth, upload.single('media'), async (req, res) => {
   const request = { telegram_id: req.user.id, type, title: title.trim(), details: details.trim(), bot_name: botName?.trim() || null, budget: numericBudget, media_path: req.file?.path || null };
   const id = createRequest(request);
   try { await bot?.notify(request, req.user, req.file?.path); } catch (error) { console.error('Telegram notification failed:', error.message); }
+  return res.status(201).json({ ok: true, id });
+});
+
+app.post('/api/messages', auth, async (req, res) => {
+  const { title, details } = req.body;
+  if (!title?.trim() || !details?.trim()) return res.status(400).json({ error: 'Напиши тему и сообщение.' });
+  if (req.user.id === 'preview') return res.json({ ok: true, preview: true });
+  const message = { telegram_id: req.user.id, title: title.trim(), details: details.trim() };
+  const id = createMessage(message);
+  try { await bot?.notify({ ...message, type: 'message' }, req.user); } catch (error) { console.error('Telegram message notification failed:', error.message); }
   return res.status(201).json({ ok: true, id });
 });
 
