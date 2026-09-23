@@ -79,6 +79,10 @@ export function getMessageByOwnerMessageId(ownerMessageId) {
   return db.prepare('SELECT * FROM messages WHERE owner_message_id = ?').get(ownerMessageId);
 }
 
+export function getMessageById(id) {
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
+}
+
 export function saveMessageReply(id, replyText) {
   db.prepare(`UPDATE messages SET reply_text = ?, replied_at = CURRENT_TIMESTAMP, status = 'answered' WHERE id = ?`).run(replyText, id);
 }
