@@ -43,7 +43,12 @@ export function createRequest(request) {
 
 export function getUserRequests(telegramId) {
   return db.prepare(`SELECT id, type, title, details, bot_name, budget, status, created_at
-    FROM requests WHERE telegram_id = ? ORDER BY id DESC`).all(telegramId);
+    FROM requests WHERE telegram_id = ? AND type != 'message' ORDER BY id DESC`).all(telegramId);
+}
+
+export function getUserMessages(telegramId) {
+  return db.prepare(`SELECT id, title, details, status, created_at
+    FROM requests WHERE telegram_id = ? AND type = 'message' ORDER BY id DESC`).all(telegramId);
 }
 
 export function getUser(telegramId) {

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import multer from 'multer';
-import { createRequest, getUser, getUserRequests, upsertUser } from './db.js';
+import { createRequest, getUserMessages, getUserRequests, upsertUser } from './db.js';
 import { startBot, validateInitData } from './telegram.js';
 
 const app = express();
@@ -44,7 +44,11 @@ app.get('/api/config', (_req, res) => res.json({
   botUsername: process.env.BOT_USERNAME || ''
 }));
 
-app.get('/api/me', auth, (req, res) => res.json({ user: req.user, requests: req.user.id === 'preview' ? [] : getUserRequests(req.user.id) }));
+app.get('/api/me', auth, (req, res) => res.json({
+  user: req.user,
+  requests: req.user.id === 'preview' ? [] : getUserRequests(req.user.id),
+  messages: req.user.id === 'preview' ? [] : getUserMessages(req.user.id)
+}));
 
 app.post('/api/requests', auth, upload.single('media'), async (req, res) => {
   const { type, title, details, botName, budget } = req.body;
