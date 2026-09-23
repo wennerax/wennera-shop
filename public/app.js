@@ -13,9 +13,17 @@ function switchView(name) {
   haptic(); window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+function openDirectMessage() {
+  const username = state.config?.owner?.username;
+  if (!username) { showToast('Личный Telegram не настроен.'); return; }
+  const url = `https://t.me/${username.replace(/^@/, '')}`;
+  if (tg?.openTelegramLink) tg.openTelegramLink(url); else window.open(url, '_blank', 'noopener,noreferrer');
+  haptic('medium');
+}
+
 function openForm(type) {
   switchView('form'); $('#form-type').value = type;
-  const data = { order: ['NEW ORDER', 'Заказать бота', 'Опиши идею, а я вернусь с оценкой и планом.', true], bug: ['BUG REPORT', 'Нашёл баг?', 'Чем точнее детали, тем быстрее я его поймаю.', true], message: ['DIRECT LINE', 'Написать мне', 'Любой вопрос, идея или предложение.', false] }[type];
+  const data = { order: ['NEW ORDER', 'Заказать бота', 'Опиши идею, а я вернусь с оценкой и планом.', true], bug: ['BUG REPORT', 'Нашёл баг?', 'Чем точнее детали, тем быстрее я его поймаю.', true] }[type];
   $('#form-kicker').textContent = data[0]; $('#form-title').textContent = data[1]; $('#form-intro').textContent = data[2]; $('#bot-name-label').style.display = type === 'bug' ? 'grid' : 'none'; $('#budget-label').style.display = type === 'order' ? 'grid' : 'none';
 }
 
@@ -24,15 +32,10 @@ function renderRequests() {
   const list = $('#request-list'); $('#empty-state').style.display = state.requests.length ? 'none' : 'block';
   list.innerHTML = state.requests.map((request) => `<article class="request"><div class="request-top"><span class="tag">${request.type === 'bug' ? 'BUG REPORT' : request.type === 'order' ? 'ORDER' : 'MESSAGE'}</span><span>${new Date(request.created_at).toLocaleDateString('ru-RU')}</span></div><h3>${escapeHtml(request.title)}</h3><p>${escapeHtml(request.details)}</p></article>`).join('');
 }
-function renderMessages() {
-  $('#message-count').textContent = state.messages.length;
-  $('#message-empty-state').style.display = state.messages.length ? 'none' : 'block';
-  $('#message-list').innerHTML = state.messages.map((message) => `<article class="request"><div class="request-top"><span class="tag">DIRECT MESSAGE</span><span>${new Date(message.created_at).toLocaleDateString('ru-RU')}</span></div><h3>${escapeHtml(message.title)}</h3><p>${escapeHtml(message.details)}</p></article>`).join('');
-}
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' })[char]); }
 
 document.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.nav)));
-document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => openForm(button.dataset.open)));
+document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => button.dataset.open === 'message' ? openDirectMessage() : openForm(button.dataset.open)));
 $('#back-button').addEventListener('click', () => switchView('home'));
 $('#fullscreen').addEventListener('click', () => { tg?.requestFullscreen?.(); tg?.expand?.(); haptic('medium'); });
 $('#request-form').addEventListener('submit', async (event) => {
@@ -43,7 +46,7 @@ $('#request-form').addEventListener('submit', async (event) => {
 
 async function loadData() {
   state.config = await api('/api/config'); $('#owner-name').textContent = state.config.owner.name; $('#owner-bio').textContent = state.config.owner.bio;
-  const data = await api('/api/me'); state.user = data.user; state.requests = data.requests; state.messages = data.messages; const fullName = [data.user.first_name, data.user.last_name].filter(Boolean).join(' '); $('#profile-name').textContent = fullName; $('#profile-handle').textContent = data.user.username ? `@${data.user.username}` : 'личный профиль'; const avatar = $('#profile-avatar'); avatar.textContent = (data.user.first_name || 'P')[0].toUpperCase(); if (data.user.photo_url) { avatar.innerHTML = `<img src="${escapeHtml(data.user.photo_url)}" alt="Аватар ${escapeHtml(fullName)}">`; avatar.classList.add('has-image'); } $('#profile-badges').textContent = data.user.is_premium ? '✦ Telegram Premium' : ''; $('#profile-bio').textContent = data.user.bio || ''; $('#profile-note').style.display = data.user.bio ? 'none' : 'block'; $('#profile-id').textContent = data.user.id; $('#profile-language').textContent = data.user.language_code || 'не указан'; renderRequests(); renderMessages();
+  const data = await api('/api/me'); state.user = data.user; state.requests = data.requests; const fullName = [data.user.first_name, data.user.last_name].filter(Boolean).join(' '); $('#profile-name').textContent = fullName; $('#profile-handle').textContent = data.user.username ? `@${data.user.username}` : 'личный профиль'; const avatar = $('#profile-avatar'); avatar.textContent = (data.user.first_name || 'P')[0].toUpperCase(); if (data.user.photo_url) { avatar.innerHTML = `<img src="${escapeHtml(data.user.photo_url)}" alt="Аватар ${escapeHtml(fullName)}">`; avatar.classList.add('has-image'); } $('#profile-badges').textContent = data.user.is_premium ? '✦ Telegram Premium' : ''; $('#profile-bio').textContent = data.user.bio || ''; $('#profile-note').style.display = data.user.bio ? 'none' : 'block'; $('#profile-id').textContent = data.user.id; $('#profile-language').textContent = data.user.language_code || 'не указан'; renderRequests();
 }
 
 tg?.ready(); tg?.expand(); tg?.setHeaderColor?.('#0b0d0f'); tg?.setBackgroundColor?.('#0b0d0f');

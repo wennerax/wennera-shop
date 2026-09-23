@@ -39,7 +39,7 @@ function auth(req, res, next) {
 const bot = startBot({ token: process.env.BOT_TOKEN, appUrl, adminId: process.env.ADMIN_TELEGRAM_ID });
 
 app.get('/api/config', (_req, res) => res.json({
-  owner: { name: process.env.OWNER_DISPLAY_NAME || 'Wennera', username: process.env.OWNER_USERNAME || '', bio: process.env.OWNER_BIO || 'Создаю ботов и Mini Apps' },
+  owner: { name: process.env.OWNER_DISPLAY_NAME || 'Wennera', username: process.env.OWNER_USERNAME || 'dissociation_n', bio: process.env.OWNER_BIO || 'Создаю ботов и Mini Apps' },
   minOrderPrice: Number(process.env.MIN_ORDER_PRICE || 2500),
   botUsername: process.env.BOT_USERNAME || ''
 }));
@@ -52,7 +52,7 @@ app.get('/api/me', auth, (req, res) => res.json({
 
 app.post('/api/requests', auth, upload.single('media'), async (req, res) => {
   const { type, title, details, botName, budget } = req.body;
-  const allowedTypes = new Set(['bug', 'order', 'message']);
+  const allowedTypes = new Set(['bug', 'order']);
   if (!allowedTypes.has(type) || !title?.trim() || !details?.trim()) return res.status(400).json({ error: 'Заполните обязательные поля.' });
   const minPrice = Number(process.env.MIN_ORDER_PRICE || 2500);
   const numericBudget = budget ? Number(budget) : null;
