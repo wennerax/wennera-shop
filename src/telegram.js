@@ -39,10 +39,14 @@ export function startBot({ token, appUrl, adminId }) {
   const activeSpamTests = new Set();
   const webAppUrl = getValidWebAppUrl(appUrl);
   const keyboard = webAppUrl ? new InlineKeyboard().webApp('Открыть ассистента', webAppUrl) : undefined;
+  const hasBusinessReplyAccess = (connection) => {
+    if (!connection?.is_enabled || String(connection.user?.id) !== String(adminId)) return false;
+    return connection.rights?.can_reply !== false;
+  };
   const validateBusinessConnection = async (connectionId) => {
     try {
       const connection = await bot.api.getBusinessConnection(connectionId);
-      if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) {
+      if (!hasBusinessReplyAccess(connection)) {
         return 'Ответ недоступен: проверь подключение и право Business-бота отвечать.';
       }
       return null;
@@ -81,7 +85,7 @@ export function startBot({ token, appUrl, adminId }) {
         const target = preferredTarget || businessTargets.get(targetKey);
         if (target) {
           const connection = await bot.api.getBusinessConnection(target.connectionId);
-          if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) {
+          if (!hasBusinessReplyAccess(connection)) {
             return 'Тест остановлен: для Business-чата нужно активное подключение с правом can_reply.';
           }
         }
@@ -215,8 +219,8 @@ export function startBot({ token, appUrl, adminId }) {
       reportBusinessErrorOnce(loggedBusinessErrors, error);
       return;
     }
-    if (!connection.is_enabled || String(connection.user.id) !== String(adminId)) return;
-    const canReply = connection.rights?.can_reply === true;
+    if (!hasBusinessReplyAccess(connection)) return;
+    const canReply = hasBusinessReplyAccess(connection);
     if (canReply) businessTargets.set(String(message.chat.id), { connectionId: message.business_connection_id, chatId: message.chat.id });
     else businessTargets.delete(String(message.chat.id));
     upsertUser({ id: String(message.chat.id), first_name: message.from.first_name, last_name: message.from.last_name ?? null, username: message.from.username ?? null, photo_url: null });
