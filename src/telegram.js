@@ -131,8 +131,9 @@ export function startBot({ token, appUrl, adminId }) {
     const id = createMessage({ telegram_id: String(ctx.from.id), title: 'Сообщение в Telegram', details: text });
     if (adminId) {
       const identity = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ');
+      const username = ctx.from.username ? ` (@${ctx.from.username})` : '';
       try {
-        const notification = await sendWithEmoji((message, options) => bot.api.sendMessage(adminId, message, options), `📩 Новое сообщение\n${identity || 'Пользователь'} · ID ${ctx.from.id}\n${text.slice(0, 2500)}${isMedia ? '\n\nОтветь на пересланное медиа или нажми «Ответить».' : ''}`, {
+        const notification = await sendWithEmoji((message, options) => bot.api.sendMessage(adminId, message, options), `📩 Новое сообщение\n${identity || 'Пользователь'}${username} · ID ${ctx.from.id}\n${text.slice(0, 2500)}${isMedia ? '\n\nОтветь на пересланное медиа или нажми «Ответить».' : ''}`, {
           reply_markup: { inline_keyboard: [[{ text: 'Ответить', callback_data: `reply:${id}` }]] }
         });
         setOwnerMessageId(id, notification.message_id);
@@ -171,12 +172,14 @@ export function startBot({ token, appUrl, adminId }) {
     }
     if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) return;
     businessTargets.set(String(message.chat.id), { connectionId: message.business_connection_id, chatId: message.chat.id });
+    upsertUser({ id: String(message.chat.id), first_name: message.from.first_name, last_name: message.from.last_name ?? null, username: message.from.username ?? null, photo_url: null });
     const text = message.text?.trim() || message.caption?.trim() || '[Пользователь отправил вложение]';
     if (adminId && process.env.BUSINESS_NOTIFICATIONS !== 'false') {
       try {
         const name = [message.from.first_name, message.from.last_name].filter(Boolean).join(' ') || 'Контакт';
+        const username = message.from.username ? ` (@${message.from.username})` : '';
         const preview = (message.text || message.caption || `📎 ${describeMessageMedia(message)}`).replace(/\s+/g, ' ').slice(0, 180);
-        await bot.api.sendMessage(adminId, `💬 ${name} · ${message.chat.id}\n${preview}`, {
+        await bot.api.sendMessage(adminId, `💬 ${name}${username} · ID ${message.chat.id}\n${preview}`, {
           reply_markup: { inline_keyboard: [[{ text: 'Ответить', callback_data: `bizreply:${message.chat.id}` }]] }
         });
         if (!message.text) {

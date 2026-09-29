@@ -96,6 +96,10 @@ export function getUser(telegramId) {
   return db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId);
 }
 
+export function getUserByUsername(username) {
+  return db.prepare('SELECT * FROM users WHERE lower(username) = lower(?) ORDER BY updated_at DESC LIMIT 1').get(username.replace(/^@/, ''));
+}
+
 export function getOwnerProfile() {
   const row = db.prepare('SELECT profile_json FROM owner_profile WHERE id = 1').get();
   return row ? JSON.parse(row.profile_json) : null;

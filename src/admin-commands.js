@@ -1,6 +1,6 @@
 import { formatDuration, getHostStatus } from './host-status.js';
 import { sendWithEmoji } from './assistant.js';
-import { getOwnerProfile, saveOwnerProfile } from './db.js';
+import { getOwnerProfile, getUserByUsername, saveOwnerProfile } from './db.js';
 import { getValidWebAppUrl } from './telegram-utils.js';
 
 const profileDrafts = new Map();
@@ -24,11 +24,24 @@ const helpText = [
   '*anketa - создать или изменить анкету',
   '*анкета - русскоязычный алиас анкеты',
   '*anketa view - показать анкету в личке',
-  '*anketa send [chat_id] - отправить анкету в этот или выбранный чат',
+  '*anketa send [id|@username] - отправить анкету в этот или выбранный чат',
   '*cancel - отменить создание анкеты',
-  '*say <id> <текст> - написать пользователю',
-  '*bizreply <id> <текст> - ответить в Business-диалог от аккаунта'
+  '*say <id|@username> <текст> - написать пользователю',
+  '*bizreply <id|@username> <текст> - ответить в Business-диалог от аккаунта',
+  'Username доступен, если пользователь уже писал боту или Business-аккаунту.'
 ].join('\n');
+
+function resolveTargetId(target, findUserByUsername = getUserByUsername) {
+  if (/^-?\d+$/.test(target)) return target;
+  if (!/^@[a-z0-9_]{5,32}$/i.test(target)) return null;
+  return findUserByUsername(target)?.telegram_id || null;
+}
+
+function unknownTargetMessage(target) {
+  return target.startsWith('@')
+    ? `Не нашёл ${target}. Username доступен после того, как пользователь напишет боту или в подключённый Business-чат.`
+    : 'Укажи числовой Telegram ID или известный боту @username.';
+}
 
 function formatProfile(profile) {
   return [
@@ -60,7 +73,7 @@ async function acceptProfileAnswer(ctx, draft, answer) {
   await sendWithEmoji((text, options) => ctx.reply(text, options), `Анкета сохранена.\n\n${formatProfile(draft.profile)}`);
 }
 
-export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply }) {
+export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, findUserByUsername = getUserByUsername }) {
   const webAppUrl = getValidWebAppUrl(appUrl);
   bot.on('message:text', async (ctx, next) => {
     let text = ctx.message.text.trim();
@@ -111,7 +124,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply 
       case 'bots': response = await getHostStatus(); break;
       case 'uptime': response = `⏱ Процесс работает ${formatDuration(process.uptime())}`; break;
       case 'ping': response = `🏓 Pong · ${new Date().toLocaleString('ru-RU')}`; break;
-      case 'id': response = `👤 Ваш ID: ${ctx.from.id}\n💬 ID чата: ${ctx.chat.id}\nТип: ${ctx.chat.type}`; break;
+      case 'id': response = `👤 Ваш ID: ${ctx.from.id}${ctx.from.username ? ` (@${ctx.from.username})` : ''}\n💬 ID чата: ${ctx.chat.id}\nТип: ${ctx.chat.type}`; break;
       case 'cancel':
         profileDrafts.delete(String(ownerId));
         response = 'Создание анкеты отменено.';
@@ -124,9 +137,17 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply 
           if (!profile) response = 'Сначала создай анкету командой *anketa.';
           else {
             try {
-              const chatId = targetChatId || ctx.chat.id;
-              await sendWithEmoji((message, options) => bot.api.sendMessage(chatId, message, options), formatProfile(profile));
-              response = `Анкета отправлена в чат ${chatId}.`;
+              const chatId = targetChatId ? resolveTargetId(targetChatId, findUserByUsername) : ctx.chat.id;
+              if (!chatId) {
+                response = unknownTargetMessage(targetChatId);
+                break;
+              }
+              const businessResponse = targetChatId ? await sendBusinessReply(chatId, formatProfile(profile)) : null;
+              if (businessResponse) response = businessResponse;
+              else {
+                await sendWithEmoji((message, options) => bot.api.sendMessage(chatId, message, options), formatProfile(profile));
+                response = `Анкета отправлена в чат ${targetChatId || chatId}.`;
+              }
             } catch (error) {
               response = `Не удалось отправить анкету: ${error.description || error.message}`;
             }
@@ -155,26 +176,35 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply 
           reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', ...(ctx.chat.type === 'private' ? { web_app: { url: webAppUrl } } : { url: webAppUrl }) }]] }
         });
       case 'say': {
-        const match = rest.match(/^(\d+)\s+([\s\S]+)$/);
-        if (!match) response = 'Формат: *say <telegram_id> <текст>';
+        const match = rest.match(/^(\S+)\s+([\s\S]+)$/);
+        if (!match) response = 'Формат: *say <telegram_id|@username> <текст>';
         else {
-          const businessResponse = await sendBusinessReply(match[1], match[2].trim());
-          if (businessResponse) response = businessResponse;
+          const targetId = resolveTargetId(match[1], findUserByUsername);
+          if (!targetId) response = unknownTargetMessage(match[1]);
           else {
-            try {
-              await sendWithEmoji((message, options) => bot.api.sendMessage(match[1], message, options), match[2].trim());
-              response = 'Сообщение отправлено.';
-            } catch (error) {
-              response = `Не удалось отправить: ${error.description || error.message}. Для обычного бота пользователь должен сначала открыть чат и нажать /start.`;
+            const businessResponse = await sendBusinessReply(targetId, match[2].trim());
+            if (businessResponse) response = businessResponse;
+            else {
+              try {
+                await sendWithEmoji((message, options) => bot.api.sendMessage(targetId, message, options), match[2].trim());
+                response = 'Сообщение отправлено.';
+              } catch (error) {
+                response = `Не удалось отправить: ${error.description || error.message}. Для обычного бота пользователь должен сначала открыть чат и нажать /start.`;
+              }
             }
           }
         }
         break;
       }
       case 'bizreply': {
-        const match = rest.match(/^(\d+)\s+([\s\S]+)$/);
-        if (!match) response = 'Формат: *bizreply <telegram_id> <текст>';
-        else response = await sendBusinessReply(match[1], match[2].trim()) || 'Нет активного Business-диалога с этим ID. Напиши пользователю через подключённый Business-аккаунт, затем повтори команду.';
+        const match = rest.match(/^(\S+)\s+([\s\S]+)$/);
+        if (!match) response = 'Формат: *bizreply <telegram_id|@username> <текст>';
+        else {
+          const targetId = resolveTargetId(match[1], findUserByUsername);
+          response = targetId
+            ? await sendBusinessReply(targetId, match[2].trim()) || 'Нет активного Business-диалога с этим ID. Напиши пользователю через подключённый Business-аккаунт, затем повтори команду.'
+            : unknownTargetMessage(match[1]);
+        }
         break;
       }
       default: response = 'Неизвестная команда. Напишите *help.';
