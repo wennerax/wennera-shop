@@ -28,6 +28,11 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
   );
+  CREATE TABLE IF NOT EXISTS owner_profile (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    profile_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 for (const column of ['language_code TEXT', 'is_premium INTEGER NOT NULL DEFAULT 0', 'bio TEXT', 'profile_music TEXT']) {
@@ -89,4 +94,15 @@ export function saveMessageReply(id, replyText) {
 
 export function getUser(telegramId) {
   return db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId);
+}
+
+export function getOwnerProfile() {
+  const row = db.prepare('SELECT profile_json FROM owner_profile WHERE id = 1').get();
+  return row ? JSON.parse(row.profile_json) : null;
+}
+
+export function saveOwnerProfile(profile) {
+  db.prepare(`INSERT INTO owner_profile (id, profile_json) VALUES (1, ?)
+    ON CONFLICT(id) DO UPDATE SET profile_json=excluded.profile_json, updated_at=CURRENT_TIMESTAMP`)
+    .run(JSON.stringify(profile));
 }

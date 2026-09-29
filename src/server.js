@@ -37,7 +37,9 @@ function auth(req, res, next) {
 }
 
 const ownerId = process.env.OWNER_TELEGRAM_ID || process.env.ADMIN_TELEGRAM_ID;
-const bot = startBot({ token: process.env.BOT_TOKEN, appUrl, adminId: ownerId });
+const bot = startBot({ token: process.env.BOT_TOKEN, appUrl, adminId: ownerId || '7288555779' });
+
+app.get('/healthz', (_req, res) => res.json({ ok: true, uptime: Math.floor(process.uptime()) }));
 
 app.get('/api/config', (_req, res) => res.json({
   owner: { name: process.env.OWNER_DISPLAY_NAME || 'Wennera', username: process.env.OWNER_USERNAME || 'dissociation_n', bio: process.env.OWNER_BIO || 'Создаю ботов и Mini Apps' },
