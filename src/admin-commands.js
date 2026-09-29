@@ -173,15 +173,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
     let response;
     switch (command.toLowerCase()) {
       case 'help':
-        if (ctx.chat.type === 'private') response = helpText;
-        else {
-          try {
-            await sendWithEmoji((message, options) => bot.api.sendMessage(ownerId, message, options), helpText);
-            response = 'Список команд отправил в личный чат.';
-          } catch {
-            response = 'Не смог отправить команды в личку. Сначала открой бота в личном чате.';
-          }
-        }
+        response = helpText;
         break;
       case 'status': {
         response = await getHostStatus();
@@ -239,21 +231,15 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
             }
           }
         } else if (action === 'view') {
-          if (ctx.chat.type !== 'private') response = 'Просмотр анкеты доступен только в личном чате с ботом.';
-          else {
-            const profile = getOwnerProfile();
-            response = profile ? formatProfile(profile) : 'Анкета ещё не создана. Напиши *anketa.';
-          }
+          const profile = getOwnerProfile();
+          response = profile ? formatProfile(profile) : 'Анкета ещё не создана. Напиши *anketa.';
         } else if (action === 'create') {
-          if (ctx.chat.type !== 'private') response = 'Создавай анкету в личном чате с ботом командой *anketa.';
-          else {
-            profileDrafts.set(String(ownerId), {
-              step: 0,
-              profile: {},
-              ...(businessMessage ? { businessContext: { chatId: String(ctx.chat.id), connectionId: businessMessage.business_connection_id } } : {})
-            });
-            return ctx.reply(`Создаём анкету. На каждом шаге отправь ответ отдельным сообщением.\n\n${profileFields[0].prompt}`);
-          }
+          profileDrafts.set(String(ownerId), {
+            step: 0,
+            profile: {},
+            ...(businessMessage ? { businessContext: { chatId: String(ctx.chat.id), connectionId: businessMessage.business_connection_id } } : {})
+          });
+          return ctx.reply(`Создаём анкету. На каждом шаге отправь ответ отдельным сообщением.\n\n${profileFields[0].prompt}`);
         } else response = 'Использование: *anketa, *anketa view или *anketa send [chat_id].';
         break;
       }
