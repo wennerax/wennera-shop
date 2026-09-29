@@ -58,6 +58,7 @@ export function startBot({ token, appUrl, adminId }) {
   };
   registerAdminCommands(bot, { ownerId: adminId, appUrl, sendBusinessReply });
   bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', keyboard ? { reply_markup: keyboard } : undefined));
+  bot.command('id', (ctx) => ctx.reply(`Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nВладелец настроен правильно: ${String(ctx.from.id) === String(adminId) ? 'да' : 'нет'}`));
   bot.command('app', (ctx) => ctx.reply(keyboard ? 'Открывай Mini App:' : 'Mini App временно недоступно: требуется публичный HTTPS APP_URL.', keyboard ? { reply_markup: keyboard } : undefined));
   bot.callbackQuery(/^reply:(\d+)$/, async (ctx) => {
     if (String(ctx.from.id) !== String(adminId)) return ctx.answerCallbackQuery({ text: 'Недостаточно прав', show_alert: true });
@@ -170,8 +171,10 @@ export function startBot({ token, appUrl, adminId }) {
       reportBusinessErrorOnce(loggedBusinessErrors, error);
       return;
     }
-    if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) return;
-    businessTargets.set(String(message.chat.id), { connectionId: message.business_connection_id, chatId: message.chat.id });
+    if (!connection.is_enabled || String(connection.user.id) !== String(adminId)) return;
+    const canReply = connection.rights?.can_reply === true;
+    if (canReply) businessTargets.set(String(message.chat.id), { connectionId: message.business_connection_id, chatId: message.chat.id });
+    else businessTargets.delete(String(message.chat.id));
     upsertUser({ id: String(message.chat.id), first_name: message.from.first_name, last_name: message.from.last_name ?? null, username: message.from.username ?? null, photo_url: null });
     const text = message.text?.trim() || message.caption?.trim() || '[Пользователь отправил вложение]';
     if (adminId && process.env.BUSINESS_NOTIFICATIONS !== 'false') {
@@ -179,9 +182,9 @@ export function startBot({ token, appUrl, adminId }) {
         const name = [message.from.first_name, message.from.last_name].filter(Boolean).join(' ') || 'Контакт';
         const username = message.from.username ? ` (@${message.from.username})` : '';
         const preview = (message.text || message.caption || `📎 ${describeMessageMedia(message)}`).replace(/\s+/g, ' ').slice(0, 180);
-        await bot.api.sendMessage(adminId, `💬 ${name}${username} · ID ${message.chat.id}\n${preview}`, {
+        await bot.api.sendMessage(adminId, `💬 ${name}${username} · ID ${message.chat.id}\n${preview}`, canReply ? {
           reply_markup: { inline_keyboard: [[{ text: 'Ответить', callback_data: `bizreply:${message.chat.id}` }]] }
-        });
+        } : {});
         if (!message.text) {
           const copied = await copyBusinessMediaToChat(bot, adminId, message);
           if (!copied) console.info(`Business media not copied: ${describeMessageMedia(message)}`);
@@ -190,6 +193,7 @@ export function startBot({ token, appUrl, adminId }) {
         console.error('Business message notification failed:', error.message);
       }
     }
+    if (!canReply) return;
     let answer = 'Это автоответ цифрового ассистента Wennera: сообщение получено, владелец ответит позже.';
     if (process.env.AI_API_KEY && message.text) {
       try {
@@ -210,7 +214,9 @@ export function startBot({ token, appUrl, adminId }) {
   if (webAppUrl) {
     bot.api.setChatMenuButton({ menu_button: { type: 'web_app', text: 'Ассистент', web_app: { url: webAppUrl } } }).catch(console.error);
   }
-  bot.start().catch(console.error);
+  bot.api.deleteWebhook({ drop_pending_updates: false })
+    .then(() => bot.start({ allowed_updates: ['message', 'callback_query', 'business_connection', 'business_message'] }))
+    .catch((error) => console.error('Telegram polling failed:', error.description || error.message));
   return { notify: async (request, user, mediaPath) => {
     if (!adminId) return;
     const label = { bug: 'Баг-репорт', order: 'Новый заказ', message: 'Новое сообщение' }[request.type];
