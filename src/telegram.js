@@ -172,7 +172,7 @@ export function startBot({ token, appUrl, adminId }) {
     if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) return;
     businessTargets.set(String(message.chat.id), { connectionId: message.business_connection_id, chatId: message.chat.id });
     const text = message.text?.trim() || message.caption?.trim() || '[Пользователь отправил вложение]';
-    if (adminId && process.env.BUSINESS_NOTIFICATIONS === 'true') {
+    if (adminId && process.env.BUSINESS_NOTIFICATIONS !== 'false') {
       try {
         const name = [message.from.first_name, message.from.last_name].filter(Boolean).join(' ') || 'Контакт';
         const preview = (message.text || message.caption || `📎 ${describeMessageMedia(message)}`).replace(/\s+/g, ' ').slice(0, 180);
