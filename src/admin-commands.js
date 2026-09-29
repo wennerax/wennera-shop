@@ -1,6 +1,7 @@
 import { formatDuration, getHostStatus } from './host-status.js';
 import { sendWithEmoji } from './assistant.js';
 import { getOwnerProfile, saveOwnerProfile } from './db.js';
+import { getValidWebAppUrl } from './telegram-utils.js';
 
 const profileDrafts = new Map();
 const profileFields = [
@@ -60,6 +61,7 @@ async function acceptProfileAnswer(ctx, draft, answer) {
 }
 
 export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply }) {
+  const webAppUrl = getValidWebAppUrl(appUrl);
   bot.on('message:text', async (ctx, next) => {
     let text = ctx.message.text.trim();
     const botUsername = bot.botInfo?.username || process.env.BOT_USERNAME || '';
@@ -145,8 +147,12 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply 
         break;
       }
       case 'app':
+        if (!webAppUrl) {
+          response = 'Mini App недоступно: настрой публичный HTTPS APP_URL.';
+          break;
+        }
         return sendWithEmoji((message, options) => ctx.reply(message, options), 'Открой Mini App:', {
-          reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', ...(ctx.chat.type === 'private' ? { web_app: { url: appUrl } } : { url: appUrl }) }]] }
+          reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', ...(ctx.chat.type === 'private' ? { web_app: { url: webAppUrl } } : { url: webAppUrl }) }]] }
         });
       case 'say': {
         const match = rest.match(/^(\d+)\s+([\s\S]+)$/);

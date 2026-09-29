@@ -5,6 +5,14 @@ import { createMessage, getMessageById, getMessageByOwnerMessageId, saveMessageR
 import { registerAdminCommands } from './admin-commands.js';
 import { generateAssistantReply, sendWithEmoji } from './assistant.js';
 import { copyBusinessMediaToChat, describeMessageMedia } from './telegram-media.js';
+import { getValidWebAppUrl, isIncomingBusinessMessage } from './telegram-utils.js';
+
+function reportBusinessErrorOnce(loggedErrors, error) {
+  const key = String(error.error_code || error.description || error.message);
+  if (loggedErrors.has(key)) return;
+  loggedErrors.add(key);
+  console.error('Business API response unavailable:', error.description || error.message);
+}
 
 export function validateInitData(initData, botToken, maxAgeSeconds = 86400) {
   if (!initData || !botToken) return null;
@@ -27,22 +35,30 @@ export function startBot({ token, appUrl, adminId }) {
   const pendingReplies = new Map();
   const businessTargets = new Map();
   const pendingBusinessReplies = new Map();
-  const keyboard = new InlineKeyboard().webApp('Открыть ассистента', appUrl);
+  const loggedBusinessErrors = new Set();
+  const webAppUrl = getValidWebAppUrl(appUrl);
+  const keyboard = webAppUrl ? new InlineKeyboard().webApp('Открыть ассистента', webAppUrl) : undefined;
   const sendBusinessReply = async (userId, text) => {
     const target = businessTargets.get(String(userId));
     if (!target) return 'Пока нет активного Business-диалога с этим пользователем.';
     try {
+      const connection = await bot.api.getBusinessConnection(target.connectionId);
+      if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) {
+        businessTargets.delete(String(userId));
+        return 'Ответ недоступен: проверь подключение и право Business-бота отвечать.';
+      }
       await sendWithEmoji((message, options) => bot.api.sendMessage(target.chatId, message, options), text, {
         business_connection_id: target.connectionId
       });
       return 'Ответ отправлен от имени Business-аккаунта.';
     } catch (error) {
+      reportBusinessErrorOnce(loggedBusinessErrors, error);
       return `Business-ответ не отправлен: ${error.description || error.message}`;
     }
   };
   registerAdminCommands(bot, { ownerId: adminId, appUrl, sendBusinessReply });
-  bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', { reply_markup: keyboard }));
-  bot.command('app', (ctx) => ctx.reply('Открывай Mini App:', { reply_markup: keyboard }));
+  bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', keyboard ? { reply_markup: keyboard } : undefined));
+  bot.command('app', (ctx) => ctx.reply(keyboard ? 'Открывай Mini App:' : 'Mini App временно недоступно: требуется публичный HTTPS APP_URL.', keyboard ? { reply_markup: keyboard } : undefined));
   bot.callbackQuery(/^reply:(\d+)$/, async (ctx) => {
     if (String(ctx.from.id) !== String(adminId)) return ctx.answerCallbackQuery({ text: 'Недостаточно прав', show_alert: true });
     const message = getMessageById(Number(ctx.match[1]));
@@ -145,7 +161,15 @@ export function startBot({ token, appUrl, adminId }) {
   });
   bot.on('business_message', async (ctx) => {
     const message = ctx.update.business_message;
-    if (!message?.business_connection_id || !message.from || String(message.from.id) === String(adminId)) return;
+    if (!isIncomingBusinessMessage(message, adminId)) return;
+    let connection;
+    try {
+      connection = await bot.api.getBusinessConnection(message.business_connection_id);
+    } catch (error) {
+      reportBusinessErrorOnce(loggedBusinessErrors, error);
+      return;
+    }
+    if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) return;
     businessTargets.set(String(message.chat.id), { connectionId: message.business_connection_id, chatId: message.chat.id });
     const text = message.text?.trim() || message.caption?.trim() || '[Пользователь отправил вложение]';
     if (adminId && process.env.BUSINESS_NOTIFICATIONS === 'true') {
@@ -177,10 +201,12 @@ export function startBot({ token, appUrl, adminId }) {
         reply_parameters: { message_id: message.message_id }
       });
     } catch (error) {
-      console.error('Business reply failed:', error.message);
+      reportBusinessErrorOnce(loggedBusinessErrors, error);
     }
   });
-  bot.api.setChatMenuButton({ menu_button: { type: 'web_app', text: 'Ассистент', web_app: { url: appUrl } } }).catch(console.error);
+  if (webAppUrl) {
+    bot.api.setChatMenuButton({ menu_button: { type: 'web_app', text: 'Ассистент', web_app: { url: webAppUrl } } }).catch(console.error);
+  }
   bot.start().catch(console.error);
   return { notify: async (request, user, mediaPath) => {
     if (!adminId) return;

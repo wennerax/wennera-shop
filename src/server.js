@@ -5,10 +5,13 @@ import express from 'express';
 import multer from 'multer';
 import { createMessage, createRequest, getUserMessages, getUserRequests, upsertUser } from './db.js';
 import { startBot, validateInitData } from './telegram.js';
+import { getValidWebAppUrl } from './telegram-utils.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const appUrl = process.env.APP_URL || `http://localhost:${port}`;
+const configuredAppUrl = process.env.APP_URL || (process.env.NODE_ENV === 'production' ? '' : `http://localhost:${port}`);
+const appUrl = getValidWebAppUrl(configuredAppUrl);
+if (!appUrl) console.error('APP_URL must be a public HTTPS URL; Telegram Mini App buttons are disabled.');
 const uploadsDir = path.resolve('uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 const upload = multer({
@@ -78,4 +81,4 @@ app.post('/api/messages', auth, async (req, res) => {
 });
 
 app.use((_req, res) => res.sendFile(path.resolve('public/index.html')));
-app.listen(port, () => console.log(`Wennera Assistant listening on ${appUrl}`));
+app.listen(port, () => console.log(`Wennera Assistant listening on ${appUrl || `port ${port}`}`));
