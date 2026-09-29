@@ -37,6 +37,7 @@ export function startBot({ token, appUrl, adminId }) {
   const pendingBusinessReplies = new Map();
   const loggedBusinessErrors = new Set();
   const activeSpamTests = new Set();
+  const businessReplyState = { enabled: true };
   const webAppUrl = getValidWebAppUrl(appUrl);
   const keyboard = webAppUrl ? new InlineKeyboard().webApp('Открыть ассистента', webAppUrl) : undefined;
   const hasBusinessReplyAccess = (connection) => {
@@ -104,7 +105,7 @@ export function startBot({ token, appUrl, adminId }) {
     })();
     return { promise };
   };
-  registerAdminCommands(bot, { ownerId: adminId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection });
+  registerAdminCommands(bot, { ownerId: adminId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, businessReplyState });
   bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', keyboard ? { reply_markup: keyboard } : undefined));
   bot.command('id', (ctx) => ctx.reply(`Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nВладелец настроен правильно: ${String(ctx.from.id) === String(adminId) ? 'да' : 'нет'}`));
   bot.command('app', (ctx) => ctx.reply(keyboard ? 'Открывай Mini App:' : 'Mini App временно недоступно: требуется публичный HTTPS APP_URL.', keyboard ? { reply_markup: keyboard } : undefined));
@@ -241,7 +242,7 @@ export function startBot({ token, appUrl, adminId }) {
         console.error('Business message notification failed:', error.message);
       }
     }
-    if (!canReply) return;
+    if (!canReply || !businessReplyState.enabled) return;
     let answer = 'Это автоответ цифрового ассистента Wennera: сообщение получено, владелец ответит позже.';
     if (process.env.AI_API_KEY && message.text) {
       try {

@@ -20,6 +20,8 @@ const helpText = [
   '*uptime - время работы процесса',
   '*ping - проверка ответа',
   '*id - ID чата и пользователя',
+  '*вкл - включить автоответчик',
+  '*выкл - выключить автоответчик',
   '*app - открыть Mini App',
   '*spam [id|@username] <1-100> <текст> - тестовые сообщения в любой чат',
   '*anketa - создать или изменить анкету',
@@ -74,7 +76,7 @@ async function acceptProfileAnswer(ctx, draft, answer) {
   await sendWithEmoji((text, options) => ctx.reply(text, options), `Анкета сохранена.\n\n${formatProfile(draft.profile)}`);
 }
 
-export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, findUserByUsername = getUserByUsername }) {
+export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, businessReplyState = { enabled: true }, findUserByUsername = getUserByUsername }) {
   const webAppUrl = getValidWebAppUrl(appUrl);
   bot.on(['message:text', 'business_message'], async (ctx, next) => {
     const businessMessage = ctx.update.business_message;
@@ -196,6 +198,16 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
       case 'uptime': response = `⏱ Процесс работает ${formatDuration(process.uptime())}`; break;
       case 'ping': response = `🏓 Pong · ${new Date().toLocaleString('ru-RU')}`; break;
       case 'id': response = `👤 Ваш ID: ${ctx.from.id}${ctx.from.username ? ` (@${ctx.from.username})` : ''}\n💬 ID чата: ${ctx.chat.id}\nТип: ${ctx.chat.type}`; break;
+      case 'вкл':
+      case 'on':
+        businessReplyState.enabled = true;
+        response = 'Автоответчик включён.';
+        break;
+      case 'выкл':
+      case 'off':
+        businessReplyState.enabled = false;
+        response = 'Автоответчик выключен.';
+        break;
       case 'cancel':
         profileDrafts.delete(String(ownerId));
         response = 'Создание анкеты отменено.';
