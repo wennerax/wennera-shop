@@ -158,11 +158,15 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply 
         const match = rest.match(/^(\d+)\s+([\s\S]+)$/);
         if (!match) response = 'Формат: *say <telegram_id> <текст>';
         else {
-          try {
-            await sendWithEmoji((message, options) => bot.api.sendMessage(match[1], message, options), match[2].trim());
-            response = 'Сообщение отправлено.';
-          } catch (error) {
-            response = `Не удалось отправить: ${error.description || error.message}`;
+          const businessResponse = await sendBusinessReply(match[1], match[2].trim());
+          if (businessResponse) response = businessResponse;
+          else {
+            try {
+              await sendWithEmoji((message, options) => bot.api.sendMessage(match[1], message, options), match[2].trim());
+              response = 'Сообщение отправлено.';
+            } catch (error) {
+              response = `Не удалось отправить: ${error.description || error.message}. Для обычного бота пользователь должен сначала открыть чат и нажать /start.`;
+            }
           }
         }
         break;
@@ -170,7 +174,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply 
       case 'bizreply': {
         const match = rest.match(/^(\d+)\s+([\s\S]+)$/);
         if (!match) response = 'Формат: *bizreply <telegram_id> <текст>';
-        else response = await sendBusinessReply(match[1], match[2].trim());
+        else response = await sendBusinessReply(match[1], match[2].trim()) || 'Нет активного Business-диалога с этим ID. Напиши пользователю через подключённый Business-аккаунт, затем повтори команду.';
         break;
       }
       default: response = 'Неизвестная команда. Напишите *help.';

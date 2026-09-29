@@ -40,7 +40,7 @@ export function startBot({ token, appUrl, adminId }) {
   const keyboard = webAppUrl ? new InlineKeyboard().webApp('Открыть ассистента', webAppUrl) : undefined;
   const sendBusinessReply = async (userId, text) => {
     const target = businessTargets.get(String(userId));
-    if (!target) return 'Пока нет активного Business-диалога с этим пользователем.';
+    if (!target) return null;
     try {
       const connection = await bot.api.getBusinessConnection(target.connectionId);
       if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) {
