@@ -21,6 +21,7 @@ const helpText = [
   '*ping - проверка ответа',
   '*id - ID чата и пользователя',
   '*app - открыть Mini App',
+  '*spam [id|@username] <1-100> <текст> - тест в разрешённом чате, 1 сообщение/сек',
   '*anketa - создать или изменить анкету',
   '*анкета - русскоязычный алиас анкеты',
   '*anketa view - показать анкету в личке',
@@ -73,7 +74,7 @@ async function acceptProfileAnswer(ctx, draft, answer) {
   await sendWithEmoji((text, options) => ctx.reply(text, options), `Анкета сохранена.\n\n${formatProfile(draft.profile)}`);
 }
 
-export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, findUserByUsername = getUserByUsername }) {
+export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, findUserByUsername = getUserByUsername }) {
   const webAppUrl = getValidWebAppUrl(appUrl);
   bot.on('message:text', async (ctx, next) => {
     let text = ctx.message.text.trim();
@@ -175,6 +176,30 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
         return sendWithEmoji((message, options) => ctx.reply(message, options), 'Открой Mini App:', {
           reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', ...(ctx.chat.type === 'private' ? { web_app: { url: webAppUrl } } : { url: webAppUrl }) }]] }
         });
+      case 'spam': {
+        const explicitTarget = rest.match(/^(\S+)\s+(\d{1,3})\s+([\s\S]+)$/);
+        const currentChatTest = rest.match(/^(\d{1,3})\s+([\s\S]+)$/);
+        const targetToken = explicitTarget?.[1];
+        const count = Number(explicitTarget?.[2] || currentChatTest?.[1]);
+        const message = (explicitTarget?.[3] || currentChatTest?.[2] || '').trim();
+        if (!message || !Number.isInteger(count) || count < 1 || count > 100) {
+          response = 'Формат: *spam [id|@username] <1-100> <текст>. Без адресата тестирует текущий чат.';
+        } else {
+          const targetId = targetToken ? resolveTargetId(targetToken, findUserByUsername) : String(ctx.chat.id);
+          if (!targetId) response = unknownTargetMessage(targetToken);
+          else if (!startSpamTest) response = 'Тестовая отправка не настроена.';
+          else {
+            const result = startSpamTest(targetId, count, message);
+            if (result.error) response = result.error;
+            else {
+              response = `Тест запущен: ${count} сообщений, интервал 1 сек.`;
+              void result.promise.then((summary) => bot.api.sendMessage(ownerId, summary))
+                .catch((error) => console.error('Spam test result notification failed:', error.message));
+            }
+          }
+        }
+        break;
+      }
       case 'say': {
         const match = rest.match(/^(\S+)\s+([\s\S]+)$/);
         if (!match) response = 'Формат: *say <telegram_id|@username> <текст>';
