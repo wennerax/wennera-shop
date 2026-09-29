@@ -61,8 +61,16 @@ async function acceptProfileAnswer(ctx, draft, answer) {
 
 export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply }) {
   bot.on('message:text', async (ctx, next) => {
-    const text = ctx.message.text.trim();
-    if (!text.startsWith('*')) {
+    let text = ctx.message.text.trim();
+    const botUsername = bot.botInfo?.username || process.env.BOT_USERNAME || '';
+    const mentionPrefix = text.match(/^@([a-z0-9_]+)\s+([\s\S]+)$/i);
+    if (mentionPrefix) {
+      if (!botUsername || mentionPrefix[1].toLowerCase() !== botUsername.toLowerCase()) return next();
+      text = mentionPrefix[2].trim();
+    }
+
+    const commandMatch = text.match(/^\*([^\s@]+)(?:@([a-z0-9_]+))?(?:\s+([\s\S]*))?$/i);
+    if (!commandMatch || (commandMatch[2] && (!botUsername || commandMatch[2].toLowerCase() !== botUsername.toLowerCase()))) {
       const draft = profileDrafts.get(String(ownerId));
       if (draft && ctx.chat.type === 'private' && String(ctx.chat.id) === String(ownerId)) {
         await acceptProfileAnswer(ctx, draft, text);
@@ -72,8 +80,8 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply 
     }
     if (String(ctx.from.id) !== String(ownerId)) return;
 
-    const [command = '', ...args] = text.slice(1).split(/\s+/);
-    const rest = args.join(' ');
+    const command = commandMatch[1];
+    const rest = commandMatch[3] || '';
     let response;
     switch (command.toLowerCase()) {
       case 'help':

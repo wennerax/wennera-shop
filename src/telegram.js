@@ -26,6 +26,7 @@ export function startBot({ token, appUrl, adminId }) {
   const bot = new Bot(token);
   const pendingReplies = new Map();
   const businessTargets = new Map();
+  const pendingBusinessReplies = new Map();
   const keyboard = new InlineKeyboard().webApp('Открыть ассистента', appUrl);
   const sendBusinessReply = async (userId, text) => {
     const target = businessTargets.get(String(userId));
@@ -55,10 +56,32 @@ export function startBot({ token, appUrl, adminId }) {
     });
     pendingReplies.set(prompt.message_id, ownerMessageId);
   });
+  bot.callbackQuery(/^bizreply:(-?\d+)$/, async (ctx) => {
+    if (String(ctx.from.id) !== String(adminId)) return ctx.answerCallbackQuery({ text: 'Недостаточно прав', show_alert: true });
+    const businessChatId = String(ctx.match[1]);
+    if (!businessTargets.has(businessChatId)) return ctx.answerCallbackQuery({ text: 'Диалог больше недоступен' });
+    await ctx.answerCallbackQuery({ text: 'Напиши ответ текстом' });
+    const prompt = await bot.api.sendMessage(String(adminId), 'Напиши ответ для Business-диалога.', {
+      reply_markup: { force_reply: true, input_field_placeholder: 'Текст ответа...' }
+    });
+    pendingBusinessReplies.set(prompt.message_id, businessChatId);
+  });
   bot.on('message', async (ctx) => {
     if (ctx.message.text?.startsWith('/') || ctx.message.text?.startsWith('*')) return;
     const isAdmin = String(ctx.from.id) === String(adminId);
     if (isAdmin && ctx.message.reply_to_message?.message_id) {
+      const businessChatId = pendingBusinessReplies.get(ctx.message.reply_to_message.message_id);
+      if (businessChatId) {
+        const replyText = ctx.message.text?.trim();
+        if (!replyText) {
+          await ctx.reply('Ответ для Business-диалога нужно отправить текстом.');
+          return;
+        }
+        const result = await sendBusinessReply(businessChatId, replyText);
+        pendingBusinessReplies.delete(ctx.message.reply_to_message.message_id);
+        await sendWithEmoji((text, options) => ctx.reply(text, options), result);
+        return;
+      }
       const replyTargetIds = [
         ctx.message.reply_to_message.message_id,
         ctx.message.reply_to_message.reply_to_message?.message_id
@@ -125,12 +148,16 @@ export function startBot({ token, appUrl, adminId }) {
     if (!message?.business_connection_id || !message.from || String(message.from.id) === String(adminId)) return;
     businessTargets.set(String(message.chat.id), { connectionId: message.business_connection_id, chatId: message.chat.id });
     const text = message.text?.trim() || message.caption?.trim() || '[Пользователь отправил вложение]';
-    if (adminId) {
+    if (adminId && process.env.BUSINESS_NOTIFICATIONS === 'true') {
       try {
-        await sendWithEmoji((content, options) => bot.api.sendMessage(adminId, content, options), `💼 Business-сообщение\nОт: ${message.from.first_name || 'Пользователь'} · ID ${message.chat.id}\n${text.slice(0, 2500)}\n\nОтвет: *bizreply ${message.chat.id} <текст>`);
+        const name = [message.from.first_name, message.from.last_name].filter(Boolean).join(' ') || 'Контакт';
+        const preview = (message.text || message.caption || `📎 ${describeMessageMedia(message)}`).replace(/\s+/g, ' ').slice(0, 180);
+        await bot.api.sendMessage(adminId, `💬 ${name} · ${message.chat.id}\n${preview}`, {
+          reply_markup: { inline_keyboard: [[{ text: 'Ответить', callback_data: `bizreply:${message.chat.id}` }]] }
+        });
         if (!message.text) {
           const copied = await copyBusinessMediaToChat(bot, adminId, message);
-          if (!copied) await bot.api.sendMessage(adminId, `Не удалось скопировать: ${describeMessageMedia(message)}`);
+          if (!copied) console.info(`Business media not copied: ${describeMessageMedia(message)}`);
         }
       } catch (error) {
         console.error('Business message notification failed:', error.message);
