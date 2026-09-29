@@ -21,10 +21,10 @@ const helpText = [
   '*ping - проверка ответа',
   '*id - ID чата и пользователя',
   '*app - открыть Mini App',
-  '*spam [id|@username] <1-100> <текст> - тест в разрешённом чате, 1 сообщение/сек',
+  '*spam [id|@username] <1-100> <текст> - тестовые сообщения в любой чат',
   '*anketa - создать или изменить анкету',
   '*анкета - русскоязычный алиас анкеты',
-  '*anketa view - показать анкету в личке',
+  '*anketa view - показать анкету',
   '*anketa send [id|@username] - отправить анкету в этот или выбранный чат',
   '*cancel - отменить создание анкеты',
   '*say <id|@username> <текст> - написать пользователю',
@@ -74,10 +74,32 @@ async function acceptProfileAnswer(ctx, draft, answer) {
   await sendWithEmoji((text, options) => ctx.reply(text, options), `Анкета сохранена.\n\n${formatProfile(draft.profile)}`);
 }
 
-export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, findUserByUsername = getUserByUsername }) {
+export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, findUserByUsername = getUserByUsername }) {
   const webAppUrl = getValidWebAppUrl(appUrl);
-  bot.on('message:text', async (ctx, next) => {
-    let text = ctx.message.text.trim();
+  bot.on(['message:text', 'business_message'], async (ctx, next) => {
+    const businessMessage = ctx.update.business_message;
+    if (businessMessage) {
+      ctx = Object.create(ctx);
+      Object.defineProperties(ctx, {
+        message: { value: businessMessage },
+        chat: { value: businessMessage.chat },
+        from: { value: businessMessage.from },
+        reply: { value: async (text, options) => {
+          try {
+            return await bot.api.sendMessage(businessMessage.chat.id, text, {
+              ...options,
+              business_connection_id: businessMessage.business_connection_id
+            });
+          } catch (error) {
+            console.error('Business command reply failed:', error.description || error.message);
+            await bot.api.sendMessage(ownerId, `Telegram не отправил ответ от Business-аккаунта: ${error.description || error.message}`);
+            return null;
+          }
+        } }
+      });
+    }
+    let text = ctx.message.text?.trim();
+    if (!text) return next();
     const botUsername = bot.botInfo?.username || process.env.BOT_USERNAME || '';
     const mentionPrefix = text.match(/^@([a-z0-9_]+)\s+([\s\S]+)$/i);
     if (mentionPrefix) {
@@ -85,16 +107,64 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
       text = mentionPrefix[2].trim();
     }
 
+    if (businessMessage && String(ctx.from?.id) === String(ownerId)) {
+      const slashCommand = text.match(/^\/(start|id|app)(?:@([a-z0-9_]+))?(?:\s+[\s\S]*)?$/i);
+      if (slashCommand) {
+        if (slashCommand[2] && (!botUsername || slashCommand[2].toLowerCase() !== botUsername.toLowerCase())) return next();
+        const connectionError = await validateBusinessConnection?.(businessMessage.business_connection_id);
+        if (connectionError) await bot.api.sendMessage(ownerId, connectionError);
+        else if (slashCommand[1].toLowerCase() === 'id') {
+          await ctx.reply(`Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nID чата: ${ctx.chat.id}`);
+        } else if (slashCommand[1].toLowerCase() === 'app') {
+          if (!webAppUrl) await ctx.reply('Mini App временно недоступно: требуется публичный HTTPS APP_URL.');
+          else await sendWithEmoji((message, options) => ctx.reply(message, options), 'Открой Mini App:', {
+            reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', url: webAppUrl }]] }
+          });
+        } else {
+          await ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', webAppUrl
+            ? { reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', url: webAppUrl }]] } }
+            : {});
+        }
+        return;
+      }
+    }
+
     const commandMatch = text.match(/^\*([^\s@]+)(?:@([a-z0-9_]+))?(?:\s+([\s\S]*))?$/i);
     if (!commandMatch || (commandMatch[2] && (!botUsername || commandMatch[2].toLowerCase() !== botUsername.toLowerCase()))) {
       const draft = profileDrafts.get(String(ownerId));
-      if (draft && ctx.chat.type === 'private' && String(ctx.chat.id) === String(ownerId)) {
+      const draftMatchesContext = draft && String(ctx.from.id) === String(ownerId) && (draft.businessContext
+        ? businessMessage
+          && String(ctx.chat.id) === draft.businessContext.chatId
+          && businessMessage.business_connection_id === draft.businessContext.connectionId
+        : !businessMessage && ctx.chat.type === 'private' && String(ctx.chat.id) === String(ownerId));
+      if (draftMatchesContext) {
+        if (businessMessage && validateBusinessConnection) {
+          const connectionError = await validateBusinessConnection(businessMessage.business_connection_id);
+          if (connectionError) {
+            await bot.api.sendMessage(ownerId, connectionError);
+            return;
+          }
+        }
         await acceptProfileAnswer(ctx, draft, text);
         return;
       }
       return next();
     }
     if (String(ctx.from.id) !== String(ownerId)) return;
+    if (businessMessage && validateBusinessConnection) {
+      const connectionError = await validateBusinessConnection(businessMessage.business_connection_id);
+      if (connectionError) {
+        await bot.api.sendMessage(ownerId, connectionError);
+        return;
+      }
+    }
+    const currentBusinessTarget = businessMessage ? {
+      connectionId: businessMessage.business_connection_id,
+      chatId: businessMessage.chat.id
+    } : null;
+    const businessTargetForChat = (chatId) => currentBusinessTarget && String(chatId) === String(ctx.chat.id)
+      ? currentBusinessTarget
+      : null;
 
     const command = commandMatch[1];
     const rest = commandMatch[3] || '';
@@ -143,7 +213,10 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
                 response = unknownTargetMessage(targetChatId);
                 break;
               }
-              const businessResponse = targetChatId ? await sendBusinessReply(chatId, formatProfile(profile)) : null;
+              const preferredTarget = businessTargetForChat(chatId);
+              const businessResponse = targetChatId || preferredTarget
+                ? await sendBusinessReply(chatId, formatProfile(profile), preferredTarget)
+                : null;
               if (businessResponse) response = businessResponse;
               else {
                 await sendWithEmoji((message, options) => bot.api.sendMessage(chatId, message, options), formatProfile(profile));
@@ -162,7 +235,11 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
         } else if (action === 'create') {
           if (ctx.chat.type !== 'private') response = 'Создавай анкету в личном чате с ботом командой *anketa.';
           else {
-            profileDrafts.set(String(ownerId), { step: 0, profile: {} });
+            profileDrafts.set(String(ownerId), {
+              step: 0,
+              profile: {},
+              ...(businessMessage ? { businessContext: { chatId: String(ctx.chat.id), connectionId: businessMessage.business_connection_id } } : {})
+            });
             return ctx.reply(`Создаём анкету. На каждом шаге отправь ответ отдельным сообщением.\n\n${profileFields[0].prompt}`);
           }
         } else response = 'Использование: *anketa, *anketa view или *anketa send [chat_id].';
@@ -174,7 +251,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
           break;
         }
         return sendWithEmoji((message, options) => ctx.reply(message, options), 'Открой Mini App:', {
-          reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', ...(ctx.chat.type === 'private' ? { web_app: { url: webAppUrl } } : { url: webAppUrl }) }]] }
+          reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', ...(ctx.chat.type === 'private' && !businessMessage ? { web_app: { url: webAppUrl } } : { url: webAppUrl }) }]] }
         });
       case 'spam': {
         const explicitTarget = rest.match(/^(\S+)\s+(\d{1,3})\s+([\s\S]+)$/);
@@ -189,11 +266,14 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
           if (!targetId) response = unknownTargetMessage(targetToken);
           else if (!startSpamTest) response = 'Тестовая отправка не настроена.';
           else {
-            const result = startSpamTest(targetId, count, message);
+            const result = startSpamTest(targetId, count, message, businessTargetForChat(targetId));
             if (result.error) response = result.error;
             else {
               response = `Тест запущен: ${count} сообщений, интервал 1 сек.`;
-              void result.promise.then((summary) => bot.api.sendMessage(ownerId, summary))
+              const notifyOwner = businessMessage
+                ? (summary) => sendWithEmoji((replyText, options) => ctx.reply(replyText, options), summary)
+                : (summary) => bot.api.sendMessage(ownerId, summary);
+              void result.promise.then(notifyOwner)
                 .catch((error) => console.error('Spam test result notification failed:', error.message));
             }
           }
@@ -207,7 +287,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
           const targetId = resolveTargetId(match[1], findUserByUsername);
           if (!targetId) response = unknownTargetMessage(match[1]);
           else {
-            const businessResponse = await sendBusinessReply(targetId, match[2].trim());
+            const businessResponse = await sendBusinessReply(targetId, match[2].trim(), businessTargetForChat(targetId));
             if (businessResponse) response = businessResponse;
             else {
               try {
@@ -227,7 +307,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
         else {
           const targetId = resolveTargetId(match[1], findUserByUsername);
           response = targetId
-            ? await sendBusinessReply(targetId, match[2].trim()) || 'Нет активного Business-диалога с этим ID. Напиши пользователю через подключённый Business-аккаунт, затем повтори команду.'
+            ? await sendBusinessReply(targetId, match[2].trim(), businessTargetForChat(targetId)) || 'Нет активного Business-диалога с этим ID. Напиши пользователю через подключённый Business-аккаунт, затем повтори команду.'
             : unknownTargetMessage(match[1]);
         }
         break;

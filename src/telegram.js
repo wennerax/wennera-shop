@@ -36,18 +36,29 @@ export function startBot({ token, appUrl, adminId }) {
   const businessTargets = new Map();
   const pendingBusinessReplies = new Map();
   const loggedBusinessErrors = new Set();
-  const spamTestChats = new Set([String(adminId), ...(process.env.SPAM_TEST_CHAT_IDS || '').split(',').map((chatId) => chatId.trim())].filter(Boolean));
   const activeSpamTests = new Set();
   const webAppUrl = getValidWebAppUrl(appUrl);
   const keyboard = webAppUrl ? new InlineKeyboard().webApp('Открыть ассистента', webAppUrl) : undefined;
-  const sendBusinessReply = async (userId, text) => {
-    const target = businessTargets.get(String(userId));
+  const validateBusinessConnection = async (connectionId) => {
+    try {
+      const connection = await bot.api.getBusinessConnection(connectionId);
+      if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) {
+        return 'Ответ недоступен: проверь подключение и право Business-бота отвечать.';
+      }
+      return null;
+    } catch (error) {
+      reportBusinessErrorOnce(loggedBusinessErrors, error);
+      return `Business-подключение недоступно: ${error.description || error.message}`;
+    }
+  };
+  const sendBusinessReply = async (userId, text, preferredTarget = null) => {
+    const target = preferredTarget || businessTargets.get(String(userId));
     if (!target) return null;
     try {
-      const connection = await bot.api.getBusinessConnection(target.connectionId);
-      if (!connection.is_enabled || String(connection.user.id) !== String(adminId) || connection.rights?.can_reply !== true) {
+      const connectionError = await validateBusinessConnection(target.connectionId);
+      if (connectionError) {
         businessTargets.delete(String(userId));
-        return 'Ответ недоступен: проверь подключение и право Business-бота отвечать.';
+        return connectionError;
       }
       await sendWithEmoji((message, options) => bot.api.sendMessage(target.chatId, message, options), text, {
         business_connection_id: target.connectionId
@@ -62,7 +73,6 @@ export function startBot({ token, appUrl, adminId }) {
     const targetKey = String(targetId);
     if (!Number.isInteger(count) || count < 1 || count > 100) return { error: 'Количество тестовых сообщений должно быть от 1 до 100.' };
     if (!text?.trim()) return { error: 'Добавь текст тестового сообщения.' };
-    if (!spamTestChats.has(targetKey)) return { error: `Чат ${targetKey} не разрешён для тестов. Добавь его ID в SPAM_TEST_CHAT_IDS.` };
     if (activeSpamTests.size) return { error: 'Другой тест уже запущен. Дождись его завершения.' };
     activeSpamTests.add(targetKey);
     const promise = (async () => {
@@ -90,7 +100,7 @@ export function startBot({ token, appUrl, adminId }) {
     })();
     return { promise };
   };
-  registerAdminCommands(bot, { ownerId: adminId, appUrl, sendBusinessReply, startSpamTest });
+  registerAdminCommands(bot, { ownerId: adminId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection });
   bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', keyboard ? { reply_markup: keyboard } : undefined));
   bot.command('id', (ctx) => ctx.reply(`Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nВладелец настроен правильно: ${String(ctx.from.id) === String(adminId) ? 'да' : 'нет'}`));
   bot.command('app', (ctx) => ctx.reply(keyboard ? 'Открывай Mini App:' : 'Mini App временно недоступно: требуется публичный HTTPS APP_URL.', keyboard ? { reply_markup: keyboard } : undefined));
@@ -197,20 +207,6 @@ export function startBot({ token, appUrl, adminId }) {
   });
   bot.on('business_message', async (ctx) => {
     const message = ctx.update.business_message;
-    const spamCommand = message.text?.trim().match(/^\*spam\s+(\d{1,3})\s+([\s\S]+)$/i);
-    if (spamCommand && String(message.from?.id) === String(adminId) && message.chat.type === 'private') {
-      const result = startSpamTest(message.chat.id, Number(spamCommand[1]), spamCommand[2].trim(), {
-        connectionId: message.business_connection_id,
-        chatId: message.chat.id
-      });
-      const status = result.error || `Тест запущен: ${spamCommand[1]} сообщений, интервал 1 сек.`;
-      await bot.api.sendMessage(adminId, status);
-      if (result.promise) {
-        void result.promise.then((summary) => bot.api.sendMessage(adminId, summary))
-          .catch((error) => console.error('Spam test result notification failed:', error.message));
-      }
-      return;
-    }
     if (!isIncomingBusinessMessage(message, adminId)) return;
     let connection;
     try {
