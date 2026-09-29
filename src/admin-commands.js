@@ -104,12 +104,15 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
     if (!text) return next();
     const botUsername = bot.botInfo?.username || process.env.BOT_USERNAME || '';
     const mentionPrefix = text.match(/^@([a-z0-9_]+)\s+([\s\S]+)$/i);
+    const isOwner = String(ctx.from?.id) === String(ownerId);
     if (mentionPrefix) {
       if (!botUsername || mentionPrefix[1].toLowerCase() !== botUsername.toLowerCase()) return next();
-      text = mentionPrefix[2].trim();
+      if (isOwner) text = mentionPrefix[2].trim();
+      else return next();
     }
+    if (!isOwner && !mentionPrefix) return next();
 
-    if (businessMessage && String(ctx.from?.id) === String(ownerId)) {
+    if (businessMessage && isOwner) {
       const slashCommand = text.match(/^\/(start|id|app)(?:@([a-z0-9_]+))?(?:\s+[\s\S]*)?$/i);
       if (slashCommand) {
         if (slashCommand[2] && (!botUsername || slashCommand[2].toLowerCase() !== botUsername.toLowerCase())) return next();
@@ -152,7 +155,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
       }
       return next();
     }
-    if (String(ctx.from.id) !== String(ownerId)) return;
+    if (!isOwner) return;
     if (businessMessage && validateBusinessConnection) {
       const connectionError = await validateBusinessConnection(businessMessage.business_connection_id);
       if (connectionError) {
