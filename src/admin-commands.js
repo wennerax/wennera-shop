@@ -409,7 +409,13 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
           const profile = getOwnerProfile();
           if (profile) {
             await deleteCommandMessage(bot, ctx);
-            return sendProfile(bot, ctx.chat.id, profile);
+            try {
+              return await sendProfile(bot, ctx.chat.id, profile, businessMessage
+                ? { business_connection_id: businessMessage.business_connection_id }
+                : {});
+            } catch (error) {
+              return ctx.reply(`Не удалось показать анкету: ${error.description || error.message}`);
+            }
           }
           response = 'Анкета ещё не создана. Для настройки используй *анкетад.';
         } else if (['create', 'edit', 'настроить'].includes(action)) {
