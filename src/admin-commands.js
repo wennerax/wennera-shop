@@ -73,7 +73,7 @@ function messageMedia(message) {
   return null;
 }
 
-async function sendProfile(bot, chatId, profile) {
+async function sendProfile(bot, chatId, profile, sendOptions = {}) {
   const mediaItems = Array.isArray(profile.media) ? profile.media : profile.media ? [profile.media] : [];
   for (const media of mediaItems) {
     if (!media.file_id) continue;
@@ -83,14 +83,18 @@ async function sendProfile(bot, chatId, profile) {
     }[media.type];
     if (method) {
       const supportsCaption = !['video_note', 'sticker'].includes(media.type);
-      const options = supportsCaption && media.caption
-        ? { caption: media.caption, caption_entities: media.caption_entities }
-        : {};
+      const options = {
+        ...(supportsCaption && media.caption ? { caption: media.caption, caption_entities: media.caption_entities } : {}),
+        ...sendOptions
+      };
       await bot.api[method](chatId, media.file_id, options);
     }
   }
   const payload = profilePayload(profile);
-  if (payload.text.trim()) await bot.api.sendMessage(chatId, payload.text, payload.entities.length ? { entities: payload.entities } : {});
+  if (payload.text.trim()) await bot.api.sendMessage(chatId, payload.text, {
+    ...(payload.entities.length ? { entities: payload.entities } : {}),
+    ...sendOptions
+  });
 }
 
 const helpText = [
@@ -101,7 +105,8 @@ const helpText = [
   '*вкл  ·  *выкл  ·  *status  ·  *bots  ·  *uptime  ·  *ping  ·  *id  ·  *app',
   '',
   'Анкета',
-  '*anketa — настроить кнопками',
+  '*anketa или *анкета — показать анкету',
+  '*анкетад — настроить кнопками',
   '*anketa view — предпросмотр',
   '*anketa send [id|@username] — отправить',
   '*cancel — отменить настройку',
@@ -179,21 +184,24 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
     if (String(ctx.from.id) !== String(ownerId)) return ctx.answerCallbackQuery({ text: 'Недостаточно прав', show_alert: true });
     const draft = profileDrafts.get(String(ownerId));
     if (!draft) return ctx.answerCallbackQuery({ text: 'Открой анкету командой *anketa.' });
-    const [action, value, style] = ctx.match[1].split(':');
+    const [action, value] = ctx.match[1].split(':');
+    const chatId = ctx.callbackQuery.message?.chat.id;
+    const sendOptions = draft.businessContext ? { business_connection_id: draft.businessContext.connectionId } : {};
+    const reply = (text, options = {}) => bot.api.sendMessage(chatId, text, { ...options, ...sendOptions });
     await ctx.answerCallbackQuery();
     if (action === 'field') {
       const field = profileFields.find(({ key }) => key === value);
       if (!field) return;
       draft.mode = 'field';
       draft.field = field.key;
-      return ctx.reply(field.prompt);
+      return reply(field.prompt);
     }
     if (action === 'media') {
       draft.mode = 'media';
-      return ctx.reply('Пришли фото, видео, GIF, стикер, аудио или файл. Можно добавить несколько вложений.');
+      return reply('Пришли фото, видео, GIF, стикер, аудио или файл. Можно добавить несколько вложений.');
     }
     if (action === 'font') {
-      return ctx.reply('Выбери стиль:', { reply_markup: { inline_keyboard: [
+      return reply('Выбери стиль:', { reply_markup: { inline_keyboard: [
         [{ text: 'Жирный', callback_data: 'profile:style:bold' }, { text: 'Курсив', callback_data: 'profile:style:italic' }],
         [{ text: 'Подчёркнутый', callback_data: 'profile:style:underline' }, { text: 'Спойлер', callback_data: 'profile:style:spoiler' }],
         [{ text: 'Моноширинный', callback_data: 'profile:style:code' }]
@@ -202,7 +210,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
     if (action === 'style') {
       if (!profileStyles[value]) return;
       draft.pendingStyle = value;
-      return ctx.reply('Для какого раздела применить стиль?', { reply_markup: { inline_keyboard: profileFields.map(({ key, label }) => [{ text: label, callback_data: `profile:fontfield:${key}` }]) } });
+      return reply('Для какого раздела применить стиль?', { reply_markup: { inline_keyboard: profileFields.map(({ key, label }) => [{ text: label, callback_data: `profile:fontfield:${key}` }]) } });
     }
     if (action === 'fontfield') {
       if (!profileFields.some(({ key }) => key === value) || !draft.pendingStyle) return;
@@ -210,15 +218,20 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
       draft.profile.styles[value] = draft.pendingStyle;
       draft.pendingStyle = null;
       saveOwnerProfile(draft.profile);
-      return ctx.reply('Стиль применён.', { reply_markup: profileKeyboard() });
+      return reply('Стиль применён.', { reply_markup: profileKeyboard() });
     }
-    if (action === 'preview') return sendProfile(bot, ctx.chat.id, draft.profile);
+    if (action === 'preview') {
+      try {
+        return await sendProfile(bot, chatId, draft.profile, sendOptions);
+      } catch (error) {
+        return reply(`Не удалось показать анкету: ${error.description || error.message}`);
+      }
+    }
     if (action === 'done') {
       saveOwnerProfile(draft.profile);
       profileDrafts.delete(String(ownerId));
-      return ctx.reply('Анкета сохранена.');
+      return reply('Анкета сохранена.');
     }
-    void style;
   });
   bot.on(['message', 'business_message'], async (ctx, next) => {
     const businessMessage = ctx.update.business_message;
@@ -267,19 +280,23 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
       const slashCommand = text.match(/^\/(start|id|app)(?:@([a-z0-9_]+))?(?:\s+[\s\S]*)?$/i);
       if (slashCommand) {
         if (slashCommand[2] && (!botUsername || slashCommand[2].toLowerCase() !== botUsername.toLowerCase())) return next();
-        const connectionError = await validateBusinessConnection?.(businessMessage.business_connection_id);
-        if (connectionError) await bot.api.sendMessage(ownerId, connectionError);
-        else if (slashCommand[1].toLowerCase() === 'id') {
-          await ctx.reply(`Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nID чата: ${ctx.chat.id}`);
-        } else if (slashCommand[1].toLowerCase() === 'app') {
-          if (!webAppUrl) await ctx.reply('Mini App временно недоступно: требуется публичный HTTPS APP_URL.');
-          else await sendWithEmoji((message, options) => ctx.reply(message, options), 'Открой Mini App:', {
-            reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', url: webAppUrl }]] }
-          });
-        } else {
-          await ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', webAppUrl
-            ? { reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', url: webAppUrl }]] } }
-            : {});
+        try {
+          const connectionError = await validateBusinessConnection?.(businessMessage.business_connection_id);
+          if (connectionError) await bot.api.sendMessage(ownerId, connectionError);
+          else if (slashCommand[1].toLowerCase() === 'id') {
+            await ctx.reply(`Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nID чата: ${ctx.chat.id}`);
+          } else if (slashCommand[1].toLowerCase() === 'app') {
+            if (!webAppUrl) await ctx.reply('Mini App временно недоступно: требуется публичный HTTPS APP_URL.');
+            else await sendWithEmoji((message, options) => ctx.reply(message, options), 'Открой Mini App:', {
+              reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', url: webAppUrl }]] }
+            });
+          } else {
+            await ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', webAppUrl
+              ? { reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', url: webAppUrl }]] } }
+              : {});
+          }
+        } finally {
+          await deleteCommandMessage(bot, ctx);
         }
         return;
       }
@@ -311,6 +328,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
       const connectionError = await validateBusinessConnection(businessMessage.business_connection_id);
       if (connectionError) {
         await bot.api.sendMessage(ownerId, connectionError);
+        await deleteCommandMessage(bot, ctx);
         return;
       }
     }
@@ -359,9 +377,11 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
         response = 'Создание анкеты отменено.';
         break;
       case 'anketa':
-      case 'анкета': {
+      case 'анкета':
+      case 'анкетад': {
         const [requestedAction, targetChatId] = rest.trim().split(/\s+/);
-        const action = requestedAction || 'create';
+        const isSetupCommand = command.toLowerCase() === 'анкетад';
+        const action = requestedAction || (isSetupCommand ? 'create' : 'view');
         if (action === 'send') {
           const profile = getOwnerProfile();
           if (!profile) response = 'Сначала создай анкету командой *anketa.';
@@ -391,8 +411,8 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
             await deleteCommandMessage(bot, ctx);
             return sendProfile(bot, ctx.chat.id, profile);
           }
-          response = 'Анкета ещё не создана. Напиши *anketa.';
-        } else if (action === 'create') {
+          response = 'Анкета ещё не создана. Для настройки используй *анкетад.';
+        } else if (['create', 'edit', 'настроить'].includes(action)) {
           profileDrafts.set(String(ownerId), {
             mode: null,
             profile: getOwnerProfile() || {},
@@ -400,7 +420,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
           });
           await deleteCommandMessage(bot, ctx);
           return ctx.reply('Настрой анкету кнопками ниже.', { reply_markup: profileKeyboard() });
-        } else response = 'Использование: *anketa, *anketa view или *anketa send [chat_id].';
+        } else response = 'Использование: *анкета, *анкетад или *anketa send [chat_id].';
         break;
       }
       case 'app':

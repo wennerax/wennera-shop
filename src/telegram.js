@@ -14,6 +14,40 @@ function reportBusinessErrorOnce(loggedErrors, error) {
   console.error('Business API response unavailable:', error.description || error.message);
 }
 
+async function deleteIncomingCommand(bot, ctx) {
+  try {
+    const businessMessage = ctx.update.business_message;
+    if (businessMessage) {
+      await bot.api.deleteBusinessMessages(businessMessage.business_connection_id, [businessMessage.message_id]);
+    } else if (ctx.chat?.id && ctx.message?.message_id) {
+      await bot.api.deleteMessage(ctx.chat.id, ctx.message.message_id);
+    }
+  } catch (error) {
+    console.warn('Command message could not be deleted:', error.description || error.message);
+  }
+}
+
+async function replyToCommand(bot, ctx, text, options) {
+  try {
+    return await ctx.reply(text, options);
+  } finally {
+    await deleteIncomingCommand(bot, ctx);
+  }
+}
+
+async function forwardIncomingMedia(bot, ownerId, message) {
+  try {
+    return await bot.api.forwardMessage(ownerId, message.chat.id, message.message_id);
+  } catch (forwardError) {
+    try {
+      return await bot.api.copyMessage(ownerId, message.chat.id, message.message_id);
+    } catch (copyError) {
+      console.error('Incoming media could not be forwarded or copied:', copyError.description || copyError.message, '(forward error:', forwardError.description || forwardError.message, ')');
+      return null;
+    }
+  }
+}
+
 export function validateInitData(initData, botToken, maxAgeSeconds = 86400) {
   if (!initData || !botToken) return null;
   const params = new URLSearchParams(initData);
@@ -107,9 +141,9 @@ export function startBot({ token, appUrl, adminId }) {
     return { promise };
   };
   registerAdminCommands(bot, { ownerId: adminId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, businessReplyState });
-  bot.command('start', (ctx) => ctx.reply('Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', keyboard ? { reply_markup: keyboard } : undefined));
-  bot.command('id', (ctx) => ctx.reply(`Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nВладелец настроен правильно: ${String(ctx.from.id) === String(adminId) ? 'да' : 'нет'}`));
-  bot.command('app', (ctx) => ctx.reply(keyboard ? 'Открывай Mini App:' : 'Mini App временно недоступно: требуется публичный HTTPS APP_URL.', keyboard ? { reply_markup: keyboard } : undefined));
+  bot.command('start', (ctx) => replyToCommand(bot, ctx, 'Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', keyboard ? { reply_markup: keyboard } : undefined));
+  bot.command('id', (ctx) => replyToCommand(bot, ctx, `Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nВладелец настроен правильно: ${String(ctx.from.id) === String(adminId) ? 'да' : 'нет'}`));
+  bot.command('app', (ctx) => replyToCommand(bot, ctx, keyboard ? 'Открывай Mini App:' : 'Mini App временно недоступно: требуется публичный HTTPS APP_URL.', keyboard ? { reply_markup: keyboard } : undefined));
   bot.callbackQuery(/^reply:(\d+)$/, async (ctx) => {
     if (String(ctx.from.id) !== String(adminId)) return ctx.answerCallbackQuery({ text: 'Недостаточно прав', show_alert: true });
     const message = getMessageById(Number(ctx.match[1]));
@@ -188,16 +222,12 @@ export function startBot({ token, appUrl, adminId }) {
           reply_markup: { inline_keyboard: [[{ text: 'Ответить', callback_data: `reply:${id}` }]] }
         });
         setOwnerMessageId(id, notification.message_id);
-        if (isMedia) {
-          try {
-            const forwarded = await bot.api.forwardMessage(adminId, ctx.chat.id, ctx.message.message_id);
-            setOwnerMessageId(id, forwarded.message_id);
-          } catch (error) {
-            console.error('Incoming media forwarding failed:', error.message);
-          }
-        }
       } catch (error) {
         console.error('Private message notification failed:', error.message);
+      }
+      if (isMedia) {
+        const forwarded = await forwardIncomingMedia(bot, adminId, ctx.message);
+        if (forwarded) setOwnerMessageId(id, forwarded.message_id);
       }
     }
     let answer = 'Сообщение получил и передал Wennera. Для заявки с подробностями открой Mini App.';
