@@ -4,7 +4,7 @@ import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { createMessage, getMessageById, getMessageByOwnerMessageId, saveMessageReply, setOwnerMessageId, upsertUser } from './db.js';
 import { registerAdminCommands } from './admin-commands.js';
 import { generateAssistantReply, sendWithEmoji } from './assistant.js';
-import { copyBusinessMediaToChat, describeMessageMedia } from './telegram-media.js';
+import { copyBusinessMediaToChat, describeMessageMedia, saveMessageMedia } from './telegram-media.js';
 import { getValidWebAppUrl, isIncomingBusinessMessage } from './telegram-utils.js';
 
 function reportBusinessErrorOnce(loggedErrors, error) {
@@ -226,6 +226,11 @@ export function startBot({ token, appUrl, adminId }) {
         console.error('Private message notification failed:', error.message);
       }
       if (isMedia) {
+        try {
+          await saveMessageMedia(bot, ctx.message);
+        } catch (error) {
+          console.error('Incoming media could not be saved locally:', error.description || error.message);
+        }
         const forwarded = await forwardIncomingMedia(bot, adminId, ctx.message);
         if (forwarded) setOwnerMessageId(id, forwarded.message_id);
       }
@@ -270,6 +275,11 @@ export function startBot({ token, appUrl, adminId }) {
       }
     }
     if (adminId && !message.text) {
+      try {
+        await saveMessageMedia(bot, message);
+      } catch (error) {
+        console.error('Business media could not be saved locally:', error.description || error.message);
+      }
       try {
         const copied = await copyBusinessMediaToChat(bot, adminId, message);
         if (!copied) console.info(`Business media not copied: ${describeMessageMedia(message)}`);

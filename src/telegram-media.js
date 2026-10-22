@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 const mediaLabels = [
   ['live_photo', 'Live Photo'],
   ['photo', 'Фото'],
@@ -25,6 +28,53 @@ export function describeMessageMedia(message) {
   if (field === 'document') return message.document.file_name || label;
   if (field === 'audio') return message.audio.title || label;
   return label;
+}
+
+function getDownloadableMedia(message) {
+  const files = [];
+  const add = (field, file) => {
+    if (file?.file_id) files.push({ field, file });
+  };
+
+  add('photo', message.photo?.at(-1));
+  for (const field of ['video', 'animation', 'audio', 'voice', 'video_note', 'document', 'sticker']) {
+    add(field, message[field]);
+  }
+  if (message.live_photo?.file_id) {
+    add('live-photo', message.live_photo.photo?.at(-1));
+    add('live-photo', message.live_photo);
+  }
+  for (const media of message.paid_media || []) {
+    add('paid-photo', media.photo?.at(-1));
+    add('paid-video', media.video);
+  }
+
+  return [...new Map(files.map(({ field, file }) => [file.file_id, { field, file }])).values()];
+}
+
+export async function saveMessageMedia(bot, message) {
+  const files = getDownloadableMedia(message);
+  if (!files.length) return [];
+
+  const archiveDir = path.resolve('uploads', 'telegram-media');
+  await fs.mkdir(archiveDir, { recursive: true });
+  const saved = [];
+
+  for (const [index, { field, file }] of files.entries()) {
+    const telegramUrl = await bot.api.getFileLink(file.file_id);
+    const response = await fetch(telegramUrl);
+    if (!response.ok) throw new Error(`Telegram media download failed: HTTP ${response.status}`);
+
+    const telegramPath = path.basename(new URL(telegramUrl).pathname);
+    const extension = path.extname(telegramPath);
+    const safeExtension = /^\.[a-zA-Z0-9]{1,10}$/.test(extension) ? extension : '.bin';
+    const filename = `chat-${message.chat.id}_message-${message.message_id}_${field}-${index + 1}${safeExtension}`;
+    const destination = path.join(archiveDir, filename);
+    await fs.writeFile(destination, Buffer.from(await response.arrayBuffer()), { flag: 'wx' });
+    saved.push(destination);
+  }
+
+  return saved;
 }
 
 export async function copyBusinessMediaToChat(bot, chatId, message) {
