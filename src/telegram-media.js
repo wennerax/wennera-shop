@@ -28,6 +28,11 @@ export function describeMessageMedia(message) {
 }
 
 export async function copyBusinessMediaToChat(bot, chatId, message) {
+  try {
+    return await bot.api.copyMessage(chatId, message.chat.id, message.message_id);
+  } catch (error) {
+    console.warn(`Telegram could not copy ${describeMessageMedia(message)} as a whole; trying a media-specific fallback:`, error.description || error.message);
+  }
   if (message.live_photo?.file_id) {
     const photo = message.live_photo.photo?.at(-1);
     if (photo) await bot.api.sendPhoto(chatId, photo.file_id);

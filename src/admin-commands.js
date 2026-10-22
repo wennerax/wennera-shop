@@ -12,26 +12,106 @@ const profileFields = [
   { key: 'contacts', label: 'Контакты', prompt: 'Добавь контакты и ссылки (или отправь - чтобы пропустить).', maxLength: 500 }
 ];
 
+const profileStyles = {
+  bold: 'bold', italic: 'italic', underline: 'underline', spoiler: 'spoiler', code: 'code'
+};
+
+function profileKeyboard() {
+  const rows = [];
+  for (let index = 0; index < profileFields.length; index += 2) {
+    rows.push(profileFields.slice(index, index + 2).map(({ key, label }) => ({ text: label, callback_data: `profile:field:${key}` })));
+  }
+  rows.push([
+    { text: 'Добавить медиа / GIF', callback_data: 'profile:media' },
+    { text: 'Форматирование', callback_data: 'profile:font' }
+  ]);
+  rows.push([
+    { text: 'Предпросмотр', callback_data: 'profile:preview' },
+    { text: 'Сохранить', callback_data: 'profile:done' }
+  ]);
+  return { inline_keyboard: rows };
+}
+
+function profilePayload(profile) {
+  const segments = [
+    { text: `👤 ${profile.name || ''}`, key: 'name', prefix: 3 },
+    { text: profile.role || '', key: 'role' },
+    { text: '' },
+    { text: 'О себе' },
+    { text: profile.about || '', key: 'about' },
+    { text: '' },
+    { text: 'Навыки и услуги' },
+    { text: profile.skills || '', key: 'skills' },
+    ...(profile.contacts ? [{ text: '' }, { text: 'Контакты' }, { text: profile.contacts, key: 'contacts' }] : [])
+  ];
+  const entities = [];
+  let text = '';
+  for (const segment of segments) {
+    if (text) text += '\n';
+    const offset = text.length;
+    text += segment.text;
+    if (!segment.key) continue;
+    const fieldOffset = offset + (segment.prefix || 0);
+    for (const entity of profile.entities?.[segment.key] || []) {
+      entities.push({ ...entity, offset: entity.offset + fieldOffset });
+    }
+    const style = profileStyles[profile.styles?.[segment.key]];
+    const valueLength = segment.text.length - (segment.prefix || 0);
+    if (style && valueLength) entities.push({ type: style, offset: fieldOffset, length: valueLength });
+  }
+  return { text, entities };
+}
+
+function messageMedia(message) {
+  for (const [field, type] of [
+    ['photo', 'photo'], ['video', 'video'], ['animation', 'animation'], ['document', 'document'],
+    ['audio', 'audio'], ['voice', 'voice'], ['video_note', 'video_note'], ['sticker', 'sticker']
+  ]) {
+    const item = field === 'photo' ? message.photo?.at(-1) : message[field];
+    if (item?.file_id) return { type, file_id: item.file_id, caption: message.caption || '', caption_entities: message.caption_entities || [] };
+  }
+  return null;
+}
+
+async function sendProfile(bot, chatId, profile) {
+  const mediaItems = Array.isArray(profile.media) ? profile.media : profile.media ? [profile.media] : [];
+  for (const media of mediaItems) {
+    if (!media.file_id) continue;
+    const method = {
+      photo: 'sendPhoto', video: 'sendVideo', animation: 'sendAnimation', document: 'sendDocument',
+      audio: 'sendAudio', voice: 'sendVoice', video_note: 'sendVideoNote', sticker: 'sendSticker'
+    }[media.type];
+    if (method) {
+      const supportsCaption = !['video_note', 'sticker'].includes(media.type);
+      const options = supportsCaption && media.caption
+        ? { caption: media.caption, caption_entities: media.caption_entities }
+        : {};
+      await bot.api[method](chatId, media.file_id, options);
+    }
+  }
+  const payload = profilePayload(profile);
+  if (payload.text.trim()) await bot.api.sendMessage(chatId, payload.text, payload.entities.length ? { entities: payload.entities } : {});
+}
+
 const helpText = [
-  '🛠 Команды владельца (только для вашего Telegram ID)',
-  '*help - список команд',
-  '*status - приложение и доступность хостов',
-  '*bots - статусы настроенных ботов',
-  '*uptime - время работы процесса',
-  '*ping - проверка ответа',
-  '*id - ID чата и пользователя',
-  '*вкл - включить автоответчик',
-  '*выкл - выключить автоответчик',
-  '*app - открыть Mini App',
-  '*spam [id|@username] <1-100> <текст> - тестовые сообщения в любой чат',
-  '*anketa - создать или изменить анкету',
-  '*анкета - русскоязычный алиас анкеты',
-  '*anketa view - показать анкету',
-  '*anketa send [id|@username] - отправить анкету в этот или выбранный чат',
-  '*cancel - отменить создание анкеты',
-  '*say <id|@username> <текст> - написать пользователю',
-  '*bizreply <id|@username> <текст> - ответить в Business-диалог от аккаунта',
-  'Username доступен, если пользователь уже писал боту или Business-аккаунту.'
+  'КОМАНДЫ ВЛАДЕЛЬЦА',
+  '',
+  'Бот',
+  '*help — эта справка',
+  '*вкл  ·  *выкл  ·  *status  ·  *bots  ·  *uptime  ·  *ping  ·  *id  ·  *app',
+  '',
+  'Анкета',
+  '*anketa — настроить кнопками',
+  '*anketa view — предпросмотр',
+  '*anketa send [id|@username] — отправить',
+  '*cancel — отменить настройку',
+  '',
+  'Сообщения',
+  '*say <id|@username> <текст>',
+  '*bizreply <id|@username> <текст>',
+  '*spam [id|@username] <1-100> <текст>',
+  '',
+  'Username доступен после первого сообщения пользователя.'
 ].join('\n');
 
 function resolveTargetId(target, findUserByUsername = getUserByUsername) {
@@ -58,27 +138,89 @@ function formatProfile(profile) {
   ].join('\n');
 }
 
-async function acceptProfileAnswer(ctx, draft, answer) {
-  const field = profileFields[draft.step];
-  const value = answer.trim();
-  if (!value || value.length > field.maxLength) {
-    await ctx.reply(`Ответ должен содержать от 1 до ${field.maxLength} символов.`);
-    return;
+async function acceptProfileAnswer(ctx, draft) {
+  if (draft.mode === 'media') {
+    const media = messageMedia(ctx.message);
+    if (!media) {
+      await ctx.reply('Пришли фото, видео, GIF, стикер, аудио или файл.');
+      return;
+    }
+    draft.profile.media ||= [];
+    if (!Array.isArray(draft.profile.media)) draft.profile.media = [draft.profile.media];
+    draft.profile.media.push(media);
+  } else {
+    const field = profileFields.find(({ key }) => key === draft.field);
+    const value = ctx.message.text?.trim() || ctx.message.caption?.trim() || '';
+    if (!field || !value || value.length > field.maxLength) {
+      await ctx.reply(`Ответ должен содержать от 1 до ${field.maxLength || 700} символов.`);
+      return;
+    }
+    draft.profile[field.key] = field.key === 'contacts' && value === '-' ? '' : value;
+    draft.profile.entities ||= {};
+    draft.profile.entities[field.key] = ctx.message.entities || ctx.message.caption_entities || [];
   }
-  draft.profile[field.key] = field.key === 'contacts' && value === '-' ? '' : value;
-  draft.step += 1;
-  if (draft.step < profileFields.length) {
-    await ctx.reply(profileFields[draft.step].prompt);
-    return;
-  }
+  draft.mode = null;
+  draft.field = null;
   saveOwnerProfile(draft.profile);
-  profileDrafts.delete(String(ctx.from.id));
-  await sendWithEmoji((text, options) => ctx.reply(text, options), `Анкета сохранена.\n\n${formatProfile(draft.profile)}`);
+  await ctx.reply('Анкета обновлена.', { reply_markup: profileKeyboard() });
 }
 
-export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, businessReplyState = { enabled: true }, findUserByUsername = getUserByUsername }) {
+async function deleteCommandMessage(bot, ctx) {
+  try {
+    const businessMessage = ctx.update.business_message;
+    if (businessMessage) await bot.api.deleteBusinessMessages(businessMessage.business_connection_id, [businessMessage.message_id]);
+    else await bot.api.deleteMessage(ctx.chat.id, ctx.message.message_id);
+  } catch {}
+}
+
+export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, businessReplyState = { enabled: false }, findUserByUsername = getUserByUsername }) {
   const webAppUrl = getValidWebAppUrl(appUrl);
-  bot.on(['message:text', 'business_message'], async (ctx, next) => {
+  bot.callbackQuery(/^profile:(.+)$/, async (ctx) => {
+    if (String(ctx.from.id) !== String(ownerId)) return ctx.answerCallbackQuery({ text: 'Недостаточно прав', show_alert: true });
+    const draft = profileDrafts.get(String(ownerId));
+    if (!draft) return ctx.answerCallbackQuery({ text: 'Открой анкету командой *anketa.' });
+    const [action, value, style] = ctx.match[1].split(':');
+    await ctx.answerCallbackQuery();
+    if (action === 'field') {
+      const field = profileFields.find(({ key }) => key === value);
+      if (!field) return;
+      draft.mode = 'field';
+      draft.field = field.key;
+      return ctx.reply(field.prompt);
+    }
+    if (action === 'media') {
+      draft.mode = 'media';
+      return ctx.reply('Пришли фото, видео, GIF, стикер, аудио или файл. Можно добавить несколько вложений.');
+    }
+    if (action === 'font') {
+      return ctx.reply('Выбери стиль:', { reply_markup: { inline_keyboard: [
+        [{ text: 'Жирный', callback_data: 'profile:style:bold' }, { text: 'Курсив', callback_data: 'profile:style:italic' }],
+        [{ text: 'Подчёркнутый', callback_data: 'profile:style:underline' }, { text: 'Спойлер', callback_data: 'profile:style:spoiler' }],
+        [{ text: 'Моноширинный', callback_data: 'profile:style:code' }]
+      ] } });
+    }
+    if (action === 'style') {
+      if (!profileStyles[value]) return;
+      draft.pendingStyle = value;
+      return ctx.reply('Для какого раздела применить стиль?', { reply_markup: { inline_keyboard: profileFields.map(({ key, label }) => [{ text: label, callback_data: `profile:fontfield:${key}` }]) } });
+    }
+    if (action === 'fontfield') {
+      if (!profileFields.some(({ key }) => key === value) || !draft.pendingStyle) return;
+      draft.profile.styles ||= {};
+      draft.profile.styles[value] = draft.pendingStyle;
+      draft.pendingStyle = null;
+      saveOwnerProfile(draft.profile);
+      return ctx.reply('Стиль применён.', { reply_markup: profileKeyboard() });
+    }
+    if (action === 'preview') return sendProfile(bot, ctx.chat.id, draft.profile);
+    if (action === 'done') {
+      saveOwnerProfile(draft.profile);
+      profileDrafts.delete(String(ownerId));
+      return ctx.reply('Анкета сохранена.');
+    }
+    void style;
+  });
+  bot.on(['message', 'business_message'], async (ctx, next) => {
     const businessMessage = ctx.update.business_message;
     if (businessMessage) {
       ctx = Object.create(ctx);
@@ -101,7 +243,16 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
       });
     }
     let text = ctx.message.text?.trim();
-    if (!text) return next();
+    if (!text) {
+      const draft = profileDrafts.get(String(ownerId));
+      const draftMatchesContext = draft && String(ctx.from?.id) === String(ownerId) && (draft.businessContext
+        ? businessMessage
+          && String(ctx.chat.id) === draft.businessContext.chatId
+          && businessMessage.business_connection_id === draft.businessContext.connectionId
+        : !businessMessage && ctx.chat.type === 'private' && String(ctx.chat.id) === String(ownerId));
+      if (draft?.mode && draftMatchesContext) return acceptProfileAnswer(ctx, draft);
+      return next();
+    }
     const botUsername = bot.botInfo?.username || process.env.BOT_USERNAME || '';
     const mentionPrefix = text.match(/^@([a-z0-9_]+)\s+([\s\S]+)$/i);
     const isOwner = String(ctx.from?.id) === String(ownerId);
@@ -150,7 +301,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
             return;
           }
         }
-        await acceptProfileAnswer(ctx, draft, text);
+        await acceptProfileAnswer(ctx, draft);
         return;
       }
       return next();
@@ -209,7 +360,8 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
         break;
       case 'anketa':
       case 'анкета': {
-        const [action = 'create', targetChatId] = rest.split(/\s+/);
+        const [requestedAction, targetChatId] = rest.trim().split(/\s+/);
+        const action = requestedAction || 'create';
         if (action === 'send') {
           const profile = getOwnerProfile();
           if (!profile) response = 'Сначала создай анкету командой *anketa.';
@@ -226,7 +378,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
                 : null;
               if (businessResponse) response = businessResponse;
               else {
-                await sendWithEmoji((message, options) => bot.api.sendMessage(chatId, message, options), formatProfile(profile));
+                await sendProfile(bot, chatId, profile);
                 response = `Анкета отправлена в чат ${targetChatId || chatId}.`;
               }
             } catch (error) {
@@ -235,14 +387,19 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
           }
         } else if (action === 'view') {
           const profile = getOwnerProfile();
-          response = profile ? formatProfile(profile) : 'Анкета ещё не создана. Напиши *anketa.';
+          if (profile) {
+            await deleteCommandMessage(bot, ctx);
+            return sendProfile(bot, ctx.chat.id, profile);
+          }
+          response = 'Анкета ещё не создана. Напиши *anketa.';
         } else if (action === 'create') {
           profileDrafts.set(String(ownerId), {
-            step: 0,
-            profile: {},
+            mode: null,
+            profile: getOwnerProfile() || {},
             ...(businessMessage ? { businessContext: { chatId: String(ctx.chat.id), connectionId: businessMessage.business_connection_id } } : {})
           });
-          return ctx.reply(`Создаём анкету. На каждом шаге отправь ответ отдельным сообщением.\n\n${profileFields[0].prompt}`);
+          await deleteCommandMessage(bot, ctx);
+          return ctx.reply('Настрой анкету кнопками ниже.', { reply_markup: profileKeyboard() });
         } else response = 'Использование: *anketa, *anketa view или *anketa send [chat_id].';
         break;
       }
@@ -251,6 +408,7 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
           response = 'Mini App недоступно: настрой публичный HTTPS APP_URL.';
           break;
         }
+        await deleteCommandMessage(bot, ctx);
         return sendWithEmoji((message, options) => ctx.reply(message, options), 'Открой Mini App:', {
           reply_markup: { inline_keyboard: [[{ text: 'Открыть ассистента', ...(ctx.chat.type === 'private' && !businessMessage ? { web_app: { url: webAppUrl } } : { url: webAppUrl }) }]] }
         });
@@ -270,12 +428,8 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
             const result = startSpamTest(targetId, count, message, businessTargetForChat(targetId));
             if (result.error) response = result.error;
             else {
-              response = `Тест запущен: ${count} сообщений, интервал 1 сек.`;
-              const notifyOwner = businessMessage
-                ? (summary) => sendWithEmoji((replyText, options) => ctx.reply(replyText, options), summary)
-                : (summary) => bot.api.sendMessage(ownerId, summary);
-              void result.promise.then(notifyOwner)
-                .catch((error) => console.error('Spam test result notification failed:', error.message));
+              response = '';
+              void result.promise.catch((error) => console.error('Spam test failed:', error.message));
             }
           }
         }
@@ -315,6 +469,17 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
       }
       default: response = 'Неизвестная команда. Напишите *help.';
     }
-    if (response) await sendWithEmoji((message, options) => ctx.reply(message, options), response);
+    let sent;
+    if (response) sent = await sendWithEmoji((message, options) => ctx.reply(message, options), response);
+    await deleteCommandMessage(bot, ctx);
+    if (['вкл', 'выкл', 'on', 'off'].includes(command.toLowerCase()) && sent?.message_id) {
+      setTimeout(() => {
+        const businessMessage = ctx.update.business_message;
+        const deletion = businessMessage
+          ? bot.api.deleteBusinessMessages(businessMessage.business_connection_id, [sent.message_id])
+          : bot.api.deleteMessage(ctx.chat.id, sent.message_id);
+        deletion.catch(() => {});
+      }, 3000).unref?.();
+    }
   });
 }

@@ -37,7 +37,8 @@ export function startBot({ token, appUrl, adminId }) {
   const pendingBusinessReplies = new Map();
   const loggedBusinessErrors = new Set();
   const activeSpamTests = new Set();
-  const businessReplyState = { enabled: true };
+  const businessReplyState = { enabled: false };
+  const autoReplySentAt = new Map();
   const webAppUrl = getValidWebAppUrl(appUrl);
   const keyboard = webAppUrl ? new InlineKeyboard().webApp('Открыть ассистента', webAppUrl) : undefined;
   const hasBusinessReplyAccess = (connection) => {
@@ -234,15 +235,21 @@ export function startBot({ token, appUrl, adminId }) {
         await bot.api.sendMessage(adminId, `💬 ${name}${username} · ID ${message.chat.id}\n${preview}`, canReply ? {
           reply_markup: { inline_keyboard: [[{ text: 'Ответить', callback_data: `bizreply:${message.chat.id}` }]] }
         } : {});
-        if (!message.text) {
-          const copied = await copyBusinessMediaToChat(bot, adminId, message);
-          if (!copied) console.info(`Business media not copied: ${describeMessageMedia(message)}`);
-        }
       } catch (error) {
         console.error('Business message notification failed:', error.message);
       }
     }
+    if (adminId && !message.text) {
+      try {
+        const copied = await copyBusinessMediaToChat(bot, adminId, message);
+        if (!copied) console.info(`Business media not copied: ${describeMessageMedia(message)}`);
+      } catch (error) {
+        console.error('Business media copy failed:', error.description || error.message);
+      }
+    }
     if (!canReply || !businessReplyState.enabled) return;
+    const lastAutoReply = autoReplySentAt.get(String(message.chat.id)) || 0;
+    if (Date.now() - lastAutoReply < 24 * 60 * 60 * 1000) return;
     let answer = 'Это автоответ цифрового ассистента Wennera: сообщение получено, владелец ответит позже.';
     if (process.env.AI_API_KEY && message.text) {
       try {
@@ -256,6 +263,7 @@ export function startBot({ token, appUrl, adminId }) {
         business_connection_id: message.business_connection_id,
         reply_parameters: { message_id: message.message_id }
       });
+      autoReplySentAt.set(String(message.chat.id), Date.now());
     } catch (error) {
       reportBusinessErrorOnce(loggedBusinessErrors, error);
     }
