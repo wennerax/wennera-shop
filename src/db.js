@@ -33,6 +33,12 @@ db.exec(`
     profile_json TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS business_mutes (
+    business_connection_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (business_connection_id, chat_id)
+  );
 `);
 
 for (const column of ['language_code TEXT', 'is_premium INTEGER NOT NULL DEFAULT 0', 'bio TEXT', 'profile_music TEXT']) {
@@ -109,4 +115,22 @@ export function saveOwnerProfile(profile) {
   db.prepare(`INSERT INTO owner_profile (id, profile_json) VALUES (1, ?)
     ON CONFLICT(id) DO UPDATE SET profile_json=excluded.profile_json, updated_at=CURRENT_TIMESTAMP`)
     .run(JSON.stringify(profile));
+}
+
+export function getBusinessMute(connectionId, chatId) {
+  const row = db.prepare(`SELECT expires_at FROM business_mutes
+    WHERE business_connection_id = ? AND chat_id = ?`).get(String(connectionId), String(chatId));
+  return row?.expires_at ?? null;
+}
+
+export function saveBusinessMute(connectionId, chatId, expiresAt) {
+  db.prepare(`INSERT INTO business_mutes (business_connection_id, chat_id, expires_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(business_connection_id, chat_id) DO UPDATE SET expires_at = excluded.expires_at`)
+    .run(String(connectionId), String(chatId), expiresAt);
+}
+
+export function removeBusinessMute(connectionId, chatId) {
+  return db.prepare(`DELETE FROM business_mutes
+    WHERE business_connection_id = ? AND chat_id = ?`).run(String(connectionId), String(chatId)).changes > 0;
 }

@@ -38,11 +38,25 @@ export function addPremiumEmoji(text) {
 
 export async function sendWithEmoji(send, text, options = {}) {
   const payload = addPremiumEmoji(text);
-  const formattedOptions = { ...options, ...(payload.entities ? { entities: payload.entities } : {}) };
+  const sourceEntities = options.entities || [];
+  const prefixLength = payload.text.length - text.length;
+  const entities = [
+    ...sourceEntities.map((entity) => ({ ...entity, offset: entity.offset + prefixLength })),
+    ...(payload.entities || [])
+  ].sort((left, right) => left.offset - right.offset);
+  const formattedOptions = { ...options, ...(entities.length ? { entities } : {}) };
   try {
     return await send(payload.text, formattedOptions);
   } catch (error) {
     if (!payload.entities || !/emoji|entit|premium/i.test(error.description || error.message)) throw error;
-    return send(`${process.env.PREMIUM_EMOJI_ALT || '✨'} ${text}`, options);
+    const fallbackText = `${process.env.PREMIUM_EMOJI_ALT || '✨'} ${text}`;
+    const fallbackEntities = sourceEntities
+      .map((entity) => ({ ...entity, offset: entity.offset + fallbackText.length - text.length }));
+    const fallbackOptions = { ...options };
+    if (sourceEntities.length) {
+      if (fallbackEntities.length) fallbackOptions.entities = fallbackEntities;
+      else delete fallbackOptions.entities;
+    }
+    return send(fallbackText, fallbackOptions);
   }
 }

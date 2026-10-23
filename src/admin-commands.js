@@ -109,6 +109,10 @@ const helpText = [
   '*анкетад — настроить кнопками',
   '*anketa view — предпросмотр',
   '*anketa send [id|@username] — отправить',
+  '*мут <время> — скрыть сообщения собеседника (например, 20м, 2ч, 1д)',
+  '*говори или *размут — снять мут',
+  '*мут <время> — скрыть сообщения собеседника (например, 20м, 2ч, 1д)',
+  '*говори или *размут — снять мут',
   '*cancel — отменить настройку',
   '',
   'Сообщения',
@@ -129,18 +133,6 @@ function unknownTargetMessage(target) {
   return target.startsWith('@')
     ? `Не нашёл ${target}. Username доступен после того, как пользователь напишет боту или в подключённый Business-чат.`
     : 'Укажи числовой Telegram ID или известный боту @username.';
-}
-
-function formatProfile(profile) {
-  return [
-    `👤 ${profile.name}`,
-    profile.role,
-    '',
-    'О себе', profile.about,
-    '',
-    'Навыки и услуги', profile.skills,
-    ...(profile.contacts ? ['', 'Контакты', profile.contacts] : [])
-  ].join('\n');
 }
 
 async function acceptProfileAnswer(ctx, draft) {
@@ -178,7 +170,7 @@ async function deleteCommandMessage(bot, ctx) {
   } catch {}
 }
 
-export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, businessReplyState = { enabled: false }, findUserByUsername = getUserByUsername }) {
+export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, validateBusinessMute, setBusinessMute, clearBusinessMute, businessReplyState = { enabled: false }, findUserByUsername = getUserByUsername }) {
   const webAppUrl = getValidWebAppUrl(appUrl);
   bot.callbackQuery(/^profile:(.+)$/, async (ctx) => {
     if (String(ctx.from.id) !== String(ownerId)) return ctx.answerCallbackQuery({ text: 'Недостаточно прав', show_alert: true });
@@ -372,6 +364,41 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
         businessReplyState.enabled = false;
         response = 'Автоответчик выключен.';
         break;
+      case 'мут': {
+        const match = rest.trim().match(/^(\d+)\s*([мчд])$/i);
+        if (!businessMessage) {
+          response = 'Мут работает только в подключённом Business-чате.';
+        } else if (!match) {
+          response = 'Формат: *мут 20м, *мут 2ч или *мут 1д.';
+        } else {
+          const amount = Number(match[1]);
+          const unit = match[2].toLowerCase();
+          const unitMs = { м: 60_000, ч: 3_600_000, д: 86_400_000 }[unit];
+          const durationMs = amount * unitMs;
+          if (!Number.isSafeInteger(amount) || amount < 1 || durationMs > 365 * 86_400_000) {
+            response = 'Укажи срок от 1 минуты до 365 дней.';
+          } else {
+            const permissionError = await validateBusinessMute?.(businessMessage.business_connection_id);
+            if (permissionError) response = permissionError;
+            else if (!setBusinessMute) response = 'Команда мута не настроена.';
+            else {
+              setBusinessMute(ctx.chat.id, businessMessage.business_connection_id, Date.now() + durationMs);
+              const unitLabel = { м: 'мин.', ч: 'ч.', д: 'дн.' }[unit];
+              response = `Мут включён на ${amount} ${unitLabel}.`;
+            }
+          }
+        }
+        break;
+      }
+      case 'говори':
+      case 'размут':
+        if (!businessMessage) response = 'Мут работает только в подключённом Business-чате.';
+        else if (!clearBusinessMute) response = 'Команда снятия мута не настроена.';
+        else {
+          clearBusinessMute(ctx.chat.id, businessMessage.business_connection_id);
+          response = 'Мут снят. Собеседник снова может писать.';
+        }
+        break;
       case 'cancel':
         profileDrafts.delete(String(ownerId));
         response = 'Создание анкеты отменено.';
@@ -392,9 +419,10 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
                 response = unknownTargetMessage(targetChatId);
                 break;
               }
+              const payload = profilePayload(profile);
               const preferredTarget = businessTargetForChat(chatId);
               const businessResponse = targetChatId || preferredTarget
-                ? await sendBusinessReply(chatId, formatProfile(profile), preferredTarget)
+                ? await sendBusinessReply(chatId, payload.text, preferredTarget, payload.entities)
                 : null;
               if (businessResponse) response = businessResponse;
               else {
@@ -498,14 +526,18 @@ export function registerAdminCommands(bot, { ownerId, appUrl, sendBusinessReply,
     let sent;
     if (response) sent = await sendWithEmoji((message, options) => ctx.reply(message, options), response);
     await deleteCommandMessage(bot, ctx);
-    if (['вкл', 'выкл', 'on', 'off'].includes(command.toLowerCase()) && sent?.message_id) {
+    const commandName = command.toLowerCase();
+    const statusDelay = ['мут', 'говори', 'размут'].includes(commandName)
+      ? 5000
+      : ['вкл', 'выкл', 'on', 'off'].includes(commandName) ? 3000 : 0;
+    if (statusDelay && sent?.message_id) {
       setTimeout(() => {
         const businessMessage = ctx.update.business_message;
         const deletion = businessMessage
           ? bot.api.deleteBusinessMessages(businessMessage.business_connection_id, [sent.message_id])
           : bot.api.deleteMessage(ctx.chat.id, sent.message_id);
         deletion.catch(() => {});
-      }, 3000).unref?.();
+      }, statusDelay).unref?.();
     }
   });
 }

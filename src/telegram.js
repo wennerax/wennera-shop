@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
-import { createMessage, getMessageById, getMessageByOwnerMessageId, saveMessageReply, setOwnerMessageId, upsertUser } from './db.js';
+import { createMessage, getBusinessMute, getMessageById, getMessageByOwnerMessageId, removeBusinessMute, saveBusinessMute, saveMessageReply, setOwnerMessageId, upsertUser } from './db.js';
 import { registerAdminCommands } from './admin-commands.js';
 import { generateAssistantReply, sendWithEmoji } from './assistant.js';
 import { copyBusinessMediaToChat, describeMessageMedia, saveMessageMedia } from './telegram-media.js';
@@ -91,7 +91,22 @@ export function startBot({ token, appUrl, adminId }) {
       return `Business-подключение недоступно: ${error.description || error.message}`;
     }
   };
-  const sendBusinessReply = async (userId, text, preferredTarget = null) => {
+  const validateBusinessMute = async (connectionId) => {
+    try {
+      const connection = await bot.api.getBusinessConnection(connectionId);
+      if (!connection?.is_enabled || String(connection.user?.id) !== String(adminId)) {
+        return 'Business-подключение неактивно или принадлежит другому аккаунту.';
+      }
+      if (!connection.rights?.can_delete_all_messages) {
+        return 'Для мута включи право Business-бота can_delete_all_messages (удаление всех сообщений).';
+      }
+      return null;
+    } catch (error) {
+      reportBusinessErrorOnce(loggedBusinessErrors, error);
+      return `Не удалось проверить право удаления: ${error.description || error.message}`;
+    }
+  };
+  const sendBusinessReply = async (userId, text, preferredTarget = null, entities = []) => {
     const target = preferredTarget || businessTargets.get(String(userId));
     if (!target) return null;
     try {
@@ -101,7 +116,8 @@ export function startBot({ token, appUrl, adminId }) {
         return connectionError;
       }
       await sendWithEmoji((message, options) => bot.api.sendMessage(target.chatId, message, options), text, {
-        business_connection_id: target.connectionId
+        business_connection_id: target.connectionId,
+        ...(entities.length ? { entities } : {})
       });
       return 'Ответ отправлен от имени Business-аккаунта.';
     } catch (error) {
@@ -140,7 +156,13 @@ export function startBot({ token, appUrl, adminId }) {
     })();
     return { promise };
   };
-  registerAdminCommands(bot, { ownerId: adminId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection, businessReplyState });
+  registerAdminCommands(bot, {
+    ownerId: adminId, appUrl, sendBusinessReply, startSpamTest, validateBusinessConnection,
+    validateBusinessMute,
+    setBusinessMute: (chatId, connectionId, expiresAt) => saveBusinessMute(connectionId, chatId, expiresAt),
+    clearBusinessMute: (chatId, connectionId) => removeBusinessMute(connectionId, chatId),
+    businessReplyState
+  });
   bot.command('start', (ctx) => replyToCommand(bot, ctx, 'Привет! Здесь можно связаться с Wennera, заказать бота или оставить заявку на баг.', keyboard ? { reply_markup: keyboard } : undefined));
   bot.command('id', (ctx) => replyToCommand(bot, ctx, `Ваш Telegram ID: ${ctx.from.id}${ctx.from.username ? `\nUsername: @${ctx.from.username}` : '\nUsername не задан'}\nВладелец настроен правильно: ${String(ctx.from.id) === String(adminId) ? 'да' : 'нет'}`));
   bot.command('app', (ctx) => replyToCommand(bot, ctx, keyboard ? 'Открывай Mini App:' : 'Mini App временно недоступно: требуется публичный HTTPS APP_URL.', keyboard ? { reply_markup: keyboard } : undefined));
@@ -256,8 +278,20 @@ export function startBot({ token, appUrl, adminId }) {
       reportBusinessErrorOnce(loggedBusinessErrors, error);
       return;
     }
-    if (!hasBusinessReplyAccess(connection)) return;
+    if (!connection?.is_enabled || String(connection.user?.id) !== String(adminId)) return;
     const canReply = hasBusinessReplyAccess(connection);
+    const muteExpiresAt = getBusinessMute(message.business_connection_id, message.chat.id);
+    if (muteExpiresAt !== null) {
+      if (muteExpiresAt > Date.now()) {
+        try {
+          await bot.api.deleteBusinessMessages(message.business_connection_id, [message.message_id]);
+        } catch (error) {
+          reportBusinessErrorOnce(loggedBusinessErrors, error);
+        }
+        return;
+      }
+      removeBusinessMute(message.business_connection_id, message.chat.id);
+    }
     if (canReply) businessTargets.set(String(message.chat.id), { connectionId: message.business_connection_id, chatId: message.chat.id });
     else businessTargets.delete(String(message.chat.id));
     upsertUser({ id: String(message.chat.id), first_name: message.from.first_name, last_name: message.from.last_name ?? null, username: message.from.username ?? null, photo_url: null });
