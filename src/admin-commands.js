@@ -147,14 +147,21 @@ async function acceptProfileAnswer(ctx, draft) {
     draft.profile.media.push(media);
   } else {
     const field = profileFields.find(({ key }) => key === draft.field);
-    const value = ctx.message.text?.trim() || ctx.message.caption?.trim() || '';
+    const rawValue = ctx.message.text ?? ctx.message.caption ?? '';
+    const value = rawValue.trim();
     if (!field || !value || value.length > field.maxLength) {
       await ctx.reply(`Ответ должен содержать от 1 до ${field.maxLength || 700} символов.`);
       return;
     }
     draft.profile[field.key] = field.key === 'contacts' && value === '-' ? '' : value;
     draft.profile.entities ||= {};
-    draft.profile.entities[field.key] = ctx.message.entities || ctx.message.caption_entities || [];
+    const leadingTrim = rawValue.length - rawValue.trimStart().length;
+    const sourceEntities = ctx.message.text !== undefined
+      ? ctx.message.entities || []
+      : ctx.message.caption_entities || [];
+    draft.profile.entities[field.key] = sourceEntities
+      .map((entity) => ({ ...entity, offset: entity.offset - leadingTrim }))
+      .filter((entity) => entity.offset >= 0 && entity.length > 0 && entity.offset + entity.length <= value.length);
   }
   draft.mode = null;
   draft.field = null;
