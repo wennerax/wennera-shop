@@ -1,5 +1,5 @@
 import { formatDuration, getHostStatus } from './host-status.js';
-import { sendWithEmoji } from './assistant.js';
+import { resolveCustomEmojiEntities, sendWithEmoji } from './assistant.js';
 import { getOwnerProfile, getUserByUsername, saveOwnerProfile } from './db.js';
 import { getValidWebAppUrl } from './telegram-utils.js';
 
@@ -91,8 +91,9 @@ async function sendProfile(bot, chatId, profile, sendOptions = {}) {
     }
   }
   const payload = profilePayload(profile);
-  if (payload.text.trim()) await bot.api.sendMessage(chatId, payload.text, {
-    ...(payload.entities.length ? { entities: payload.entities } : {}),
+  const resolvedPayload = await resolveCustomEmojiEntities(bot, payload.text, payload.entities);
+  if (resolvedPayload.text.trim()) await bot.api.sendMessage(chatId, resolvedPayload.text, {
+    ...(resolvedPayload.entities.length ? { entities: resolvedPayload.entities } : {}),
     ...sendOptions
   });
 }

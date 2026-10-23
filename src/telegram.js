@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { createMessage, getBusinessMute, getMessageById, getMessageByOwnerMessageId, removeBusinessMute, saveBusinessMute, saveMessageReply, setOwnerMessageId, upsertUser } from './db.js';
 import { registerAdminCommands } from './admin-commands.js';
-import { generateAssistantReply, sendWithEmoji } from './assistant.js';
+import { generateAssistantReply, resolveCustomEmojiEntities, sendWithEmoji } from './assistant.js';
 import { copyBusinessMediaToChat, describeMessageMedia, saveMessageMedia } from './telegram-media.js';
 import { getValidWebAppUrl, isIncomingBusinessMessage } from './telegram-utils.js';
 
@@ -115,9 +115,10 @@ export function startBot({ token, appUrl, adminId }) {
         businessTargets.delete(String(userId));
         return connectionError;
       }
-      await sendWithEmoji((message, options) => bot.api.sendMessage(target.chatId, message, options), text, {
+      const resolvedPayload = await resolveCustomEmojiEntities(bot, text, entities);
+      await sendWithEmoji((message, options) => bot.api.sendMessage(target.chatId, message, options), resolvedPayload.text, {
         business_connection_id: target.connectionId,
-        ...(entities.length ? { entities } : {})
+        ...(resolvedPayload.entities.length ? { entities: resolvedPayload.entities } : {})
       });
       return 'Ответ отправлен от имени Business-аккаунта.';
     } catch (error) {
